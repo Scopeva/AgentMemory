@@ -74,8 +74,8 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         # Start background indexing loop (drains pending jobs periodically)
         bg_loop = BackgroundIndexingLoop(
             dispatcher=dispatcher,
-            interval_seconds=30.0,
-            empty_backoff_seconds=120.0,
+            interval_seconds=config.workers.interval_seconds,
+            empty_backoff_seconds=config.workers.empty_backoff_seconds,
         )
         bg_loop.start()
         app.state.bg_indexing_loop = bg_loop

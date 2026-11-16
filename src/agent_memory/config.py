@@ -81,6 +81,12 @@ class SecurityConfig:
 
 
 @dataclass
+class WorkersConfig:
+    interval_seconds: float = 30.0
+    empty_backoff_seconds: float = 120.0
+
+
+@dataclass
 class AppConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
@@ -89,6 +95,7 @@ class AppConfig:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     events: EventsConfig = field(default_factory=EventsConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
+    workers: WorkersConfig = field(default_factory=WorkersConfig)
 
 
 def _apply_env_overrides(config: AppConfig, env: dict[str, str]) -> AppConfig:
@@ -103,6 +110,16 @@ def _apply_env_overrides(config: AppConfig, env: dict[str, str]) -> AppConfig:
         config.embedding.enabled = enabled.lower() in {"1", "true", "yes", "on"}
     if token_env := env.get("AGENT_MEMORY_SECURITY_ADMIN_TOKEN_ENV"):
         config.security.admin_token_env = token_env
+    if interval := env.get("AGENT_MEMORY_WORKERS_INTERVAL_SECONDS"):
+        try:
+            config.workers.interval_seconds = float(interval)
+        except ValueError:
+            pass
+    if backoff := env.get("AGENT_MEMORY_WORKERS_EMPTY_BACKOFF_SECONDS"):
+        try:
+            config.workers.empty_backoff_seconds = float(backoff)
+        except ValueError:
+            pass
     return config
 
 
@@ -122,6 +139,7 @@ def load_config(path: str | None = None) -> AppConfig:
         memory=MemoryConfig(**data.get("memory", {})),
         events=EventsConfig(**data.get("events", {})),
         security=SecurityConfig(**data.get("security", {})),
+        workers=WorkersConfig(**data.get("workers", {})),
     )
     config = _apply_env_overrides(config, os.environ)
     config.embedding.validate_endpoint()

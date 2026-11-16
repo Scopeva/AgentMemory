@@ -42,3 +42,10 @@ max_extraction_attempts = 1
 # macOS Keychain, not from this TOML file.
 mcp_allowed_agents = ["pi", "codex", "opencode"]
 admin_token_env = "AGENT_MEMORY_ADMIN_TOKEN"
+
+[workers]
+# Background indexing loop cadence.
+# interval_seconds: sleep between drain cycles when work is pending.
+# empty_backoff_seconds: longer sleep when the queue is empty.
+interval_seconds = 30.0
+empty_backoff_seconds = 120.0
