@@ -66,9 +66,50 @@ class TestMemoryctlCLI:
         assert rc == 0
 
     def test_index_rebuild_queues_jobs(self, db_env: str):
-        # Seed a knowledge row first
         rc = main(["index", "rebuild"])
         assert rc == 0
+
+    def test_index_rebuild_scoped_project(self, db_env: str):
+        import sqlite3
+
+        # Register two projects, seed one knowledge row each
+        rc = main(["projects", "register", "--name", "pA", "--project-id", "projA"])
+        assert rc == 0
+        rc = main(["projects", "register", "--name", "pB", "--project-id", "projB"])
+        assert rc == 0
+        conn = sqlite3.connect(db_env)
+        conn.row_factory = sqlite3.Row
+        now = "2026-01-01T00:00:00Z"
+        import uuid
+        for pid in ("projA", "projB"):
+            conn.execute(
+                "INSERT INTO knowledge (memory_id, project_id, scope, type, status, title, content, revision, created_at, updated_at) "
+                "VALUES (?, ?, 'project', 'note', 'accepted', 't', 'c', 1, ?, ?)",
+                (str(uuid.uuid4()), pid, now, now),
+            )
+        conn.commit()
+        conn.close()
+
+        # Scoped rebuild must only queue projA jobs
+        rc = main(["index", "rebuild", "--project-id", "projA"])
+        assert rc == 0
+        conn = sqlite3.connect(db_env)
+        conn.row_factory = sqlite3.Row
+        jobs = conn.execute(
+            "SELECT project_id, COUNT(*) AS n FROM index_jobs GROUP BY project_id"
+        ).fetchall()
+        conn.close()
+        assert [j["project_id"] for j in jobs] == ["projA"], f"scoped rebuild leaked: {jobs}"
+
+    def test_index_status_json_output(self, db_env: str):
+        import io, json, contextlib
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main(["index", "status", "--json"])
+        assert rc == 0
+        data = json.loads(buf.getvalue())
+        assert "fts_chunks" in data and "index_jobs" in data
 
     def test_index_drain_no_pending(self, db_env: str):
         rc = main(["index", "drain", "--batch-size", "5"])

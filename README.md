@@ -72,9 +72,9 @@ memoryctl tasks list                    # task inspection
 memoryctl handoffs latest               # show latest handoff
 memoryctl memory search|inspect         # knowledge search
 memoryctl pending list|approve          # candidate review
-memoryctl index status                  # FTS/vector/job queue snapshot
-memoryctl index drain [--batch-size N]  # one-shot outbox drain
-memoryctl index rebuild                 # requeue all active knowledge rows
+memoryctl index status [--json]        # FTS/vector/job queue snapshot (--json for scripting)
+memoryctl index drain [--batch-size N] # one-shot outbox drain
+memoryctl index rebuild [--project-id] # requeue all (or one project's) knowledge rows
 memoryctl jobs retry [job-id|--all]     # reset failed index jobs to pending
 memoryctl backup create|verify          # SQLite backup + integrity check
 memoryctl knowledge supersede|archive|reject|governance

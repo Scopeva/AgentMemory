@@ -423,7 +423,14 @@ def cmd_index_status(args) -> int:
         "vector_rows": vec_count,
         "index_jobs": {"pending": pending, "failed": failed, "completed": completed},
     }
-    print(json.dumps(status, indent=2))
+    if getattr(args, "json", False):
+        print(json.dumps(status))
+    else:
+        print(f"fts_table:        {fts_table}")
+        print(f"fts_chunks:       {fts_count}")
+        print(f"vector_available: {status['vector_available']}")
+        print(f"vector_rows:      {vec_count}")
+        print(f"index_jobs:       pending={pending} failed={failed} completed={completed}")
     return 0
 
 
@@ -510,33 +517,71 @@ def cmd_index_drain(args) -> int:
 
 
 def cmd_index_rebuild(args) -> int:
-    """Rebuild all indexes from scratch: wipe FTS + vector tables, requeue all knowledge rows."""
+    """Rebuild indexes from scratch.
+
+    Without --project-id: wipes all FTS + vector entries and requeues every
+    active knowledge row (full rebuild).
+
+    With --project-id: only wipes index entries belonging to that project and
+    requeues only its active knowledge rows.
+    """
     cfg = _load_cfg()
     conn = _connect(cfg)
-
-    # Wipe existing index data
-    fts_tables = [
-        r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'memory_chunks_fts%'"
-        ).fetchall()
-    ]
-    for t in fts_tables:
-        conn.execute(f"DELETE FROM {t}")
-    vec_exists = conn.execute(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_vectors'"
-    ).fetchone()[0]
-    if vec_exists:
-        conn.execute("DELETE FROM memory_vectors")
-
-    # Reset all index jobs
-    conn.execute("DELETE FROM index_jobs")
-
-    # Requeue all active knowledge rows
-    active_rows = conn.execute(
-        "SELECT memory_id, project_id FROM knowledge WHERE status != 'rejected'"
-    ).fetchall()
-    now = _utcnow()
     import uuid
+    now = _utcnow()
+
+    if args.project_id:
+        # Scoped rebuild: only this project's index data.
+        fts_tables = [
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'memory_chunks_fts%'"
+            ).fetchall()
+        ]
+        for t in fts_tables:
+            conn.execute(
+                f"DELETE FROM {t} WHERE project_id = ?", (args.project_id,)
+            )
+        vec_exists = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_vectors'"
+        ).fetchone()[0]
+        if vec_exists:
+            # memory_id is not project-scoped in the vector table; rebuild from
+            # knowledge rows of this project.
+            mem_ids = [r[0] for r in conn.execute(
+                "SELECT memory_id FROM knowledge WHERE project_id = ?",
+                (args.project_id,),
+            ).fetchall()]
+            for mid in mem_ids:
+                conn.execute(
+                    "DELETE FROM memory_vectors WHERE memory_id = ?", (mid,)
+                )
+        conn.execute(
+            "DELETE FROM index_jobs WHERE project_id = ?", (args.project_id,)
+        )
+        active_rows = conn.execute(
+            "SELECT memory_id, project_id FROM knowledge "
+            "WHERE status != 'rejected' AND project_id = ?",
+            (args.project_id,),
+        ).fetchall()
+    else:
+        # Full rebuild.
+        fts_tables = [
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'memory_chunks_fts%'"
+            ).fetchall()
+        ]
+        for t in fts_tables:
+            conn.execute(f"DELETE FROM {t}")
+        vec_exists = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_vectors'"
+        ).fetchone()[0]
+        if vec_exists:
+            conn.execute("DELETE FROM memory_vectors")
+        conn.execute("DELETE FROM index_jobs")
+        active_rows = conn.execute(
+            "SELECT memory_id, project_id FROM knowledge WHERE status != 'rejected'"
+        ).fetchall()
+
     for row in active_rows:
         conn.execute(
             "INSERT INTO index_jobs (job_id, memory_id, project_id, job_type, status, attempts, created_at, updated_at) "
@@ -545,7 +590,8 @@ def cmd_index_rebuild(args) -> int:
         )
     conn.commit()
     conn.close()
-    print(f"rebuild queued {len(active_rows)} knowledge rows for reindexing")
+    scope = f" project {args.project_id}" if args.project_id else ""
+    print(f"rebuild{scope}: queued {len(active_rows)} knowledge rows for reindexing")
     print("run 'memoryctl index drain' to process them")
     return 0
 
@@ -803,11 +849,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     ip = sub.add_parser("index", help="Index management")
     isub = ip.add_subparsers(dest="index_cmd", required=True)
-    isub.add_parser("status", help="Show index status").set_defaults(func=cmd_index_status)
+    ist = isub.add_parser("status", help="Show index status")
+    ist.add_argument("--json", action="store_true", help="output as JSON (for scripting)")
+    ist.set_defaults(func=cmd_index_status)
     idp = isub.add_parser("drain", help="Drain pending index jobs")
     idp.add_argument("--batch-size", type=int, default=100)
     idp.set_defaults(func=cmd_index_drain)
-    isub.add_parser("rebuild", help="Rebuild indexes").set_defaults(func=cmd_index_rebuild)
+    irb = isub.add_parser("rebuild", help="Rebuild indexes")
+    irb.add_argument("--project-id", default=None, help="scope rebuild to a single project")
+    irb.set_defaults(func=cmd_index_rebuild)
 
     jp = sub.add_parser("jobs", help="Background job management")
     jsub = jp.add_subparsers(dest="jobs_cmd", required=True)
