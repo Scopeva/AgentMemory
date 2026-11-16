@@ -363,18 +363,216 @@ def cmd_backup_verify(args) -> int:
 
 
 def cmd_index_status(args) -> int:
-    print("index status: FTS5 available; sqlite-vec not yet enabled (Phase 4)")
+    """Show index table stats: FTS5 chunks, vector rows, pending jobs."""
+    cfg = _load_cfg()
+    conn = _connect(cfg)
+
+    fts_table = None
+    try:
+        fts_table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'memory_chunks_fts%' LIMIT 1"
+        ).fetchone()
+        fts_table = fts_table[0] if fts_table else None
+    except sqlite3.Error:
+        pass
+    fts_count = 0
+    if fts_table:
+        try:
+            row = conn.execute(f"SELECT COUNT(*) FROM {fts_table}").fetchone()
+            fts_count = row[0] if row else 0
+        except sqlite3.Error:
+            fts_count = -1
+
+    vec_count = 0
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_vectors'"
+        ).fetchone()
+        vec_table_exists = row[0] if row else 0
+        if vec_table_exists:
+            cnt = conn.execute("SELECT COUNT(*) FROM memory_vectors").fetchone()
+            vec_count = cnt[0] if cnt else 0
+    except sqlite3.Error:
+        vec_count = -1
+
+    pending = 0
+    failed = 0
+    completed = 0
+    try:
+        row = conn.execute(
+            "SELECT status, COUNT(*) FROM index_jobs GROUP BY status"
+        ).fetchall()
+        for r in row:
+            if r["status"] == "pending":
+                pending = r[0]
+            elif r["status"] == "failed":
+                failed = r[0]
+            elif r["status"] == "completed":
+                completed = r[0]
+    except sqlite3.Error:
+        pass
+
+    conn.close()
+
+    from agent_memory.retrieval.vector import vec_available
+
+    status = {
+        "fts_table": fts_table,
+        "fts_chunks": fts_count,
+        "vector_available": vec_available(),
+        "vector_rows": vec_count,
+        "index_jobs": {"pending": pending, "failed": failed, "completed": completed},
+    }
+    print(json.dumps(status, indent=2))
     return 0
 
 
+def cmd_index_drain(args) -> int:
+    """Manually drain pending index jobs (one-shot, no background loop needed)."""
+    cfg = _load_cfg()
+    conn = _connect(cfg)
+    conn.execute("PRAGMA journal_mode = WAL")
+
+    rows = conn.execute(
+        "SELECT job_id, memory_id, project_id, job_type FROM index_jobs "
+        "WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?",
+        (args.batch_size,),
+    ).fetchall()
+
+    if not rows:
+        conn.close()
+        print(f"no pending index jobs (batch_size={args.batch_size})")
+        return 0
+
+    import asyncio
+    from agent_memory.retrieval.indexing import IndexingWorker
+    from agent_memory.retrieval.embedding import create_provider
+
+    embedder = None
+    if cfg.embedding.enabled:
+        try:
+            embedder = create_provider(cfg.embedding)
+        except Exception as exc:
+            print(f"warning: embedding provider unavailable, lexical-only: {exc}")
+
+    worker = IndexingWorker(conn, cfg.retrieval, embedder)
+
+    results = []
+    for row in rows:
+        conn.execute(
+            "UPDATE index_jobs SET status='running', attempts=attempts+1, updated_at=? WHERE job_id=?",
+            (_utcnow(), row["job_id"]),
+        )
+        conn.commit()
+        try:
+            if row["job_type"] == "delete":
+                worker.delete_knowledge_index(row["memory_id"])
+                conn.execute(
+                    "UPDATE index_jobs SET status='skipped', updated_at=? WHERE job_id=?",
+                    (_utcnow(), row["job_id"]),
+                )
+                results.append({"job_id": row["job_id"], "status": "skipped"})
+            else:
+                krow = conn.execute(
+                    "SELECT memory_id, project_id, title, content, status, summary "
+                    "FROM knowledge WHERE memory_id=?",
+                    (row["memory_id"],),
+                ).fetchone()
+                if krow is None:
+                    conn.execute(
+                        "UPDATE index_jobs SET status='skipped', updated_at=? WHERE job_id=?",
+                        (_utcnow(), row["job_id"]),
+                    )
+                    results.append({"job_id": row["job_id"], "status": "skipped", "reason": "knowledge not found"})
+                    conn.commit()
+                    continue
+                kdict = dict(krow)
+                res = asyncio.get_event_loop().run_until_complete(
+                    worker.index_knowledge(row["memory_id"], kdict)
+                )
+                conn.execute(
+                    "UPDATE index_jobs SET status='completed', updated_at=? WHERE job_id=?",
+                    (_utcnow(), row["job_id"]),
+                )
+                results.append({"job_id": row["job_id"], "status": "completed", **res})
+        except Exception as exc:
+            conn.execute(
+                "UPDATE index_jobs SET status='failed', error=?, updated_at=? WHERE job_id=?",
+                (str(exc), _utcnow(), row["job_id"]),
+            )
+            results.append({"job_id": row["job_id"], "status": "failed", "error": str(exc)})
+        conn.commit()
+
+    conn.close()
+    print(json.dumps({"drained": len(results), "results": results}, indent=2))
+    failed_n = sum(1 for r in results if r["status"] == "failed")
+    return 0 if failed_n == 0 else 1
+
+
 def cmd_index_rebuild(args) -> int:
-    print("index rebuild not yet implemented (Phase 4)")
-    return 1
+    """Rebuild all indexes from scratch: wipe FTS + vector tables, requeue all knowledge rows."""
+    cfg = _load_cfg()
+    conn = _connect(cfg)
+
+    # Wipe existing index data
+    fts_tables = [
+        r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'memory_chunks_fts%'"
+        ).fetchall()
+    ]
+    for t in fts_tables:
+        conn.execute(f"DELETE FROM {t}")
+    vec_exists = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_vectors'"
+    ).fetchone()[0]
+    if vec_exists:
+        conn.execute("DELETE FROM memory_vectors")
+
+    # Reset all index jobs
+    conn.execute("DELETE FROM index_jobs")
+
+    # Requeue all active knowledge rows
+    active_rows = conn.execute(
+        "SELECT memory_id, project_id FROM knowledge WHERE status != 'rejected'"
+    ).fetchall()
+    now = _utcnow()
+    import uuid
+    for row in active_rows:
+        conn.execute(
+            "INSERT INTO index_jobs (job_id, memory_id, project_id, job_type, status, attempts, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'index', 'pending', 0, ?, ?)",
+            (str(uuid.uuid4()), row["memory_id"], row["project_id"], now, now),
+        )
+    conn.commit()
+    conn.close()
+    print(f"rebuild queued {len(active_rows)} knowledge rows for reindexing")
+    print("run 'memoryctl index drain' to process them")
+    return 0
 
 
 def cmd_jobs_retry(args) -> int:
-    print("jobs retry not yet implemented (Phase 4)")
-    return 1
+    """Retry failed index jobs."""
+    cfg = _load_cfg()
+    conn = _connect(cfg)
+    failed_rows = conn.execute(
+        "SELECT job_id, memory_id, project_id, job_type, attempts, error FROM index_jobs WHERE status='failed'"
+    ).fetchall()
+    if not failed_rows:
+        conn.close()
+        print("no failed jobs to retry")
+        return 0
+
+    now = _utcnow()
+    for row in failed_rows:
+        conn.execute(
+            "UPDATE index_jobs SET status='pending', attempts=attempts+1, error=NULL, updated_at=? WHERE job_id=?",
+            (now, row["job_id"]),
+        )
+    conn.commit()
+    conn.close()
+    print(f"reset {len(failed_rows)} failed jobs to pending")
+    print("run 'memoryctl index drain' to retry them")
+    return 0
 
 
 def cmd_knowledge_supersede(args) -> int:
@@ -606,6 +804,9 @@ def build_parser() -> argparse.ArgumentParser:
     ip = sub.add_parser("index", help="Index management")
     isub = ip.add_subparsers(dest="index_cmd", required=True)
     isub.add_parser("status", help="Show index status").set_defaults(func=cmd_index_status)
+    idp = isub.add_parser("drain", help="Drain pending index jobs")
+    idp.add_argument("--batch-size", type=int, default=100)
+    idp.set_defaults(func=cmd_index_drain)
     isub.add_parser("rebuild", help="Rebuild indexes").set_defaults(func=cmd_index_rebuild)
 
     jp = sub.add_parser("jobs", help="Background job management")

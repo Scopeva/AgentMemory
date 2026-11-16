@@ -65,13 +65,18 @@ class TestMemoryctlCLI:
         rc = main(["index", "status"])
         assert rc == 0
 
-    def test_index_rebuild_not_implemented(self, db_env: str):
+    def test_index_rebuild_queues_jobs(self, db_env: str):
+        # Seed a knowledge row first
         rc = main(["index", "rebuild"])
-        assert rc == 1
+        assert rc == 0
 
-    def test_jobs_retry_not_implemented(self, db_env: str):
+    def test_index_drain_no_pending(self, db_env: str):
+        rc = main(["index", "drain", "--batch-size", "5"])
+        assert rc == 0
+
+    def test_jobs_retry_no_failed(self, db_env: str):
         rc = main(["jobs", "retry"])
-        assert rc == 1
+        assert rc == 0
 
     def test_backup_create_and_verify(self, db_env: str, tmp_path: Path):
         backup = str(tmp_path / "backup.db")
