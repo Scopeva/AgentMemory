@@ -19,6 +19,7 @@ from agent_memory.retrieval.embedding import create_provider
 from agent_memory.retrieval.indexing import IndexingWorker
 from agent_memory.retrieval.dispatcher import JobDispatcher
 from agent_memory.retrieval.search import SearchService
+from agent_memory.workers import BackgroundIndexingLoop
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,20 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         set_search_service(search_svc)
         set_job_dispatcher(dispatcher)
 
+        # Start background indexing loop (drains pending jobs periodically)
+        bg_loop = BackgroundIndexingLoop(
+            dispatcher=dispatcher,
+            interval_seconds=30.0,
+            empty_backoff_seconds=120.0,
+        )
+        bg_loop.start()
+        app.state.bg_indexing_loop = bg_loop
+
         yield
+
+        # Stop the background loop cleanly on shutdown
+        await bg_loop.stop()
+        sync_conn.close()
 
     app = FastAPI(
         title="Local Agent Memory & Handoff Service",

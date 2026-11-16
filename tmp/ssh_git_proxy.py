@@ -1,84 +1,99 @@
 #!/usr/bin/env python3
-"""Minimal SSH transport proxy for git.
+"""GIT_SSH_COMMAND proxy: forward git's ssh calls through paramiko.
 
-Usage (as GIT_SSH_COMMAND):
-    python /tmp/ssh_git_proxy.py ssh -T git@github.com ...
+git invokes this instead of the missing `ssh` binary. It reads the
+sandbox's Ed25519 private key, opens a paramiko connection to GitHub,
+runs the requested git remote command (e.g. git-receive-pack), and
+streams data bidirectionally between local stdin/stdout and the
+remote channel.
 
-git will invoke this in place of the real `ssh` binary. We forward all
-subprocess-level git commands (clone/fetch/push) through a paramiko
-connection using the sandbox's private key.
+Env:
+    SSH_PROXY_KEY   path to the Ed25519 private key (default: ~/.ssh/id_ed25519_sandbox)
+    SSH_PROXY_DEBUG if set, print diagnostics to stderr
 """
-import os, sys, threading
+import os, sys, shlex, threading
 
 import paramiko
 
-KEY = os.path.expanduser("~/.ssh/id_ed25519_sandbox")
+def main() -> int:
+    args = sys.argv[1:]
+    # git passes: ssh [-T] git@host git-receive-pack '/Owner/repo.git'
+    host = None
+    for i, a in enumerate(args):
+        if a.startswith("git@"):
+            host = a.split("@", 1)[1]
+            cmd_args = args[i + 1:]
+            break
+    if host is None:
+        print("ssh_git_proxy: no git@host argument found", file=sys.stderr)
+        return 2
+    if not cmd_args:
+        print("ssh_git_proxy: no remote command found", file=sys.stderr)
+        return 2
 
-def _open_connection(host):
-    key = paramiko.Ed25519Key.from_private_key_file(KEY)
+    # join with spaces; GitHub's remote-side sshd handles quoting on its end
+    remote_cmd = " ".join(cmd_args)
+    debug = os.environ.get("SSH_PROXY_DEBUG")
+    if debug:
+        print(f"[ssh_git_proxy] exec: {remote_cmd}", file=sys.stderr)
+
+    key_path = os.environ.get(
+        "SSH_PROXY_KEY",
+        os.path.expanduser("~/.ssh/id_ed25519_sandbox"),
+    )
+    key = paramiko.Ed25519Key.from_private_key_file(key_path)
+
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(host, port=22, username="git", pkey=key, timeout=30)
-    return client
 
-def main():
-    args = sys.argv[1:]
-    # expected: args[0] == "ssh"; look for "git@host" among args
-    host = None
-    for a in args:
-        if a.startswith("git@"):
-            host = a.split("@", 1)[1]
-            break
-    if host is None:
-        print("cannot parse host", file=sys.stderr)
-        sys.exit(2)
-
-    # Determine which git command to run: the last arg that is not a host
-    # git passes the command as the final argument, e.g.
-    #   ssh -T git@github.com git-upload-pack '/Repo.git'
-    # or for push:
-    #   ssh -T git@github.com git-receive-pack '/Repo.git'
-    cmd_args = args[args.index(host)+1:]
-    if not cmd_args:
-        print("no command found", file=sys.stderr)
-        sys.exit(2)
-    remote_cmd = " ".join(shlex.quote(a) for a in cmd_args)
-    import shlex
-    remote_cmd = " ".join(shlex.quote(a) for a in cmd_args)
-
-    client = _open_connection(host)
     chan = client.get_transport().open_session()
-    chan.exec_(remote_cmd)
+    chan.exec_command(remote_cmd)
+    if debug:
+        print(f"[ssh_git_proxy] channel opened for {remote_cmd}", file=sys.stderr)
 
-    # Bidirectional copy between local stdin/stdout and the channel
-    # (in git's case, the data flows through the subprocess pipes).
-    # paramiko channels aren't selectable with select(), so we thread them.
-    done = threading.Event()
-    def send_thread():
+    def pump_to_remote():
         try:
-            while not done.is_set():
+            while True:
                 data = os.read(0, 65536)
                 if not data:
                     break
                 chan.sendall(data)
             chan.shutdown_write()
-        except Exception:
+        except (OSError, EOFError):
             pass
-        finally:
-            done.set()
+        except Exception as e:
+            if debug:
+                print(f"[ssh_git_proxy] send error: {e}", file=sys.stderr)
 
-    t = threading.Thread(target=send_thread, daemon=True)
+    t = threading.Thread(target=pump_to_remote, daemon=True)
     t.start()
 
-    while True:
-        data = chan.recv(65536)
-        if not data:
-            break
-        os.write(1, data)
-    chan.close()
-    client.close()
-    rc = chan.get_exit_status() or 0
-    sys.exit(rc)
+    out = os.fdopen(1, "wb", closefd=False)
+    err = os.fdopen(2, "wb", closefd=False)
+    try:
+        while True:
+            data = chan.recv(65536)
+            if not data:
+                break
+            out.write(data)
+            out.flush()
+            if chan.recv_stderr_ready():
+                err_data = chan.recv_stderr(65536)
+                err.write(b"[remote-stderr] " + err_data + b"\n")
+                err.flush()
+        while chan.recv_stderr_ready():
+            err_data = chan.recv_stderr(65536)
+            err.write(b"[remote-stderr] " + err_data + b"\n")
+            err.flush()
+    except (OSError, EOFError):
+        pass
+    finally:
+        rc = chan.recv_exit_status()
+        if debug:
+            print(f"[ssh_git_proxy] remote exit status: {rc}", file=sys.stderr)
+        client.close()
+    return rc if rc is not None else 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
