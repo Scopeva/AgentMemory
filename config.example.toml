@@ -1,0 +1,44 @@
+[server]
+host = "127.0.0.1"
+port = 8765
+transport = "streamable-http"
+
+[database]
+path = "~/.local/share/agent-memory/memory.db"
+journal_mode = "wal"
+busy_timeout_ms = 5000
+
+[embedding]
+# BGE-M3 runs as a local llama service container.
+# Use a host-reachable URL, e.g. http://host.docker.internal:8001 or the
+# container's exposed host port.
+provider = "bge-m3-http"
+endpoint = "http://127.0.0.1:8001"
+model = "bge-m3"
+dimension = 1024
+enabled = true
+
+[retrieval]
+lexical_top_k = 20
+vector_top_k = 20
+final_top_k = 6
+rrf_k = 60
+chunk_max_chars = 800
+chunk_min_chars = 200
+batch_index_max_docs = 100
+
+[memory]
+auto_capture = true
+approval_required_for_adr = true
+max_context_tokens = 2000
+
+[events]
+durable_spool = true
+retry_enabled = true
+max_extraction_attempts = 1
+
+[security]
+# Credentials and admin tokens should come from environment variables or the
+# macOS Keychain, not from this TOML file.
+mcp_allowed_agents = ["pi", "codex", "opencode"]
+admin_token_env = "AGENT_MEMORY_ADMIN_TOKEN"

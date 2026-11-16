@@ -1,0 +1,14 @@
+6. [- handoff · PyPI agent](https://pypi.org/project/handoff-agent/)
+status # handoff + latest session per project # show registered adapters (built-in + plugins). agent config # view configuration handoff config --edit # edit configuration. agents handoff handoff Cursor and GitHub Copilot Chat are on the roadmap — they live inside VS Code &#39;s SQLite , which needs a different adapter approach. Configuration. state
+
+7. [- MCP Server obsmcp](https://mcprepository.com/nikzdevz/obsmcp)
+in project . compact, prompt-friendly continuity files in .context. human-readable notes and state in Obsidian vaults. SQLite handoffs automation. memory search. GitHub execution. Those are useful, but they do not solve the bigger operational problem: When an AI model stops, switches, crashes, resumes, or code work, how does the next model continue the hands cleanly? That is the problem off is built to solve. project obsmcp
+
+8. [- nikzdevz/ GitHub : OBS MCP / Obsidian MCP for OBSMCP ... project](https://github.com/nikzdevz/OBSMCP)
+in project . compact, prompt-friendly continuity files in .context. human-readable notes and state in Obsidian vaults. auditable session history, task history, and model-to-model SQLite . handoffs -aware semantic knowledge through a handoffs Atlas and semantic lookup layer. If you are building with Codex, Claude code , Cursor, Warp, VS Code MCP clients, or your own internal tooling, Code is designed to be the shared memory and Code -management layer those tools can all use together. obsmcp project
+
+9. [Best MCP Servers for Coding (2025) - DEV Community Agents](https://dev.to/seakai/best-mcp-servers-for-coding-agents-2025-57i7)
+Version Control & Code Management. 1. GitHub MCP Server (Essential). What it does: Full GitHub API access — repos, issues, PRs, commits, CI runs. Why you need it: Every coding needs to read existing agent , create branches, open PRs, and respond to issues. Best for: code that ship Agents to production, not just generate snippets. Setup: npx @modelcontextprotocol/server- code + github token. GitHub
+
+10. [Hugging Face Open-Sourced A Tool for Monitoring AI Agents ...](https://www.youtube.com/watch?v=GoG2-SSSU5k)
+I cloned an innocent-looking TypeScript project , asked my coding to set it up and run the tests, and while all nine tests passed, the agent quietly sent every API key from my .env file to a stranger&#39;s server. A hidden comment in the README told it to. In this video I take a look at safeagents, a free, open-source proxy from Hugging Face that sits between your agent and the model and checks every tool call before it runs. coding agent
