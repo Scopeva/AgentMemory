@@ -118,8 +118,17 @@ async def get_job_state(
     job_id: str,
     db: Database = Depends(get_db),
 ) -> dict:
-    """Placeholder: query background job status (implemented in Phase 4+)."""
-    raise HTTPException(status_code=404, detail="Jobs API not yet implemented")
+    """Query the status of a background index job."""
+    async with db.connection() as conn:
+        cursor = await conn.execute(
+            "SELECT job_id, memory_id, project_id, job_type, status, attempts, "
+            "error, created_at, updated_at FROM index_jobs WHERE job_id = ?",
+            (job_id,),
+        )
+        row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"job {job_id} not found")
+    return dict(row)
 
 
 # ---------------------------------------------------------------------------
@@ -173,4 +182,23 @@ async def retry_job(
     job_id: str,
     db: Database = Depends(get_db),
 ) -> dict:
-    raise HTTPException(status_code=404, detail="Jobs retry not yet implemented")
+    """Reset a failed index job back to pending so the background loop can pick it up."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+    async with db.connection() as conn:
+        cursor = await conn.execute(
+            "SELECT job_id, status FROM index_jobs WHERE job_id = ?", (job_id,)
+        )
+        row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"job {job_id} not found")
+    if dict(row)["status"] != "failed":
+        raise HTTPException(status_code=409, detail=f"job {job_id} is not in failed state (status={dict(row)['status']})")
+    async with db.connection() as conn:
+        await conn.execute(
+            "UPDATE index_jobs SET status='pending', attempts=attempts+1, error=NULL, updated_at=? "
+            "WHERE job_id=? AND status='failed'",
+            (now, job_id),
+        )
+    return {"job_id": job_id, "action": "reset_to_pending"}
