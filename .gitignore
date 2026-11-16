@@ -8,7 +8,19 @@ dist/
 build/
 *.egg-info/
 .env
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Scratch / agent artifacts
+.b64_part*.txt
+.part1_decoded.bin
+.compacted/
+.history/
+*.tar.gz
+
+# Agent state
 data/
-*.db
 *.db-wal
 *.db-shm
