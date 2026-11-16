@@ -23,6 +23,6 @@ cd "$(dirname "$0")/.."   # repo root
 REMOTE_URL="https://x-access-token:${GITHUB_PAT}@github.com/Scopeva/AgentMemory.git"
 
 # Use the token URL for this push only; do not rewrite the stored remote.
-git push "${REMOTE_URL#https://}" master
+git push "$REMOTE_URL" master
 
 echo "pushed master to Scopeva/AgentMemory"
