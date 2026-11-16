@@ -362,19 +362,27 @@ def cmd_backup_verify(args) -> int:
         return 1
 
 
+def _fts5_table(conn: sqlite3.Connection) -> str | None:
+    """Return the FTS5 virtual table name if it exists (chunks_fts)."""
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_fts'"
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _vector_table(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_vectors'"
+    ).fetchone()
+    return bool(row and row[0])
+
+
 def cmd_index_status(args) -> int:
     """Show index table stats: FTS5 chunks, vector rows, pending jobs."""
     cfg = _load_cfg()
     conn = _connect(cfg)
 
-    fts_table = None
-    try:
-        fts_table = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'memory_chunks_fts%' LIMIT 1"
-        ).fetchone()
-        fts_table = fts_table[0] if fts_table else None
-    except sqlite3.Error:
-        pass
+    fts_table = _fts5_table(conn)
     fts_count = 0
     if fts_table:
         try:
@@ -384,25 +392,21 @@ def cmd_index_status(args) -> int:
             fts_count = -1
 
     vec_count = 0
-    try:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_vectors'"
-        ).fetchone()
-        vec_table_exists = row[0] if row else 0
-        if vec_table_exists:
+    if _vector_table(conn):
+        try:
             cnt = conn.execute("SELECT COUNT(*) FROM memory_vectors").fetchone()
             vec_count = cnt[0] if cnt else 0
-    except sqlite3.Error:
-        vec_count = -1
+        except sqlite3.Error:
+            vec_count = -1
 
     pending = 0
     failed = 0
     completed = 0
     try:
-        row = conn.execute(
+        rows = conn.execute(
             "SELECT status, COUNT(*) FROM index_jobs GROUP BY status"
         ).fetchall()
-        for r in row:
+        for r in rows:
             if r["status"] == "pending":
                 pending = r[0]
             elif r["status"] == "failed":
@@ -481,7 +485,7 @@ def cmd_index_drain(args) -> int:
                 results.append({"job_id": row["job_id"], "status": "skipped"})
             else:
                 krow = conn.execute(
-                    "SELECT memory_id, project_id, title, content, status, summary "
+                    "SELECT memory_id, project_id, title, content, status "
                     "FROM knowledge WHERE memory_id=?",
                     (row["memory_id"],),
                 ).fetchone()
@@ -524,33 +528,35 @@ def cmd_index_rebuild(args) -> int:
 
     With --project-id: only wipes index entries belonging to that project and
     requeues only its active knowledge rows.
+
+    FTS5 (chunks_fts) cannot be filtered by project_id directly, so scoped
+    deletes are done via memory_id (the chunk's entity_id). Full rebuilds
+    delete the entire FTS + vector tables.
     """
     cfg = _load_cfg()
     conn = _connect(cfg)
     import uuid
     now = _utcnow()
 
+    fts_table = _fts5_table(conn)
+    vec_table = _vector_table(conn)
+
     if args.project_id:
-        # Scoped rebuild: only this project's index data.
-        fts_tables = [
-            r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'memory_chunks_fts%'"
-            ).fetchall()
-        ]
-        for t in fts_tables:
-            conn.execute(
-                f"DELETE FROM {t} WHERE project_id = ?", (args.project_id,)
-            )
-        vec_exists = conn.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_vectors'"
-        ).fetchone()[0]
-        if vec_exists:
-            # memory_id is not project-scoped in the vector table; rebuild from
-            # knowledge rows of this project.
-            mem_ids = [r[0] for r in conn.execute(
-                "SELECT memory_id FROM knowledge WHERE project_id = ?",
-                (args.project_id,),
-            ).fetchall()]
+        # Scoped rebuild: delete only this project's index data.
+        # FTS5: delete chunks belonging to this project's memory rows.
+        if fts_table:
+            mem_ids = [
+                r[0] for r in conn.execute(
+                    "SELECT memory_id FROM knowledge WHERE project_id = ?",
+                    (args.project_id,),
+                ).fetchall()
+            ]
+            for mid in mem_ids:
+                conn.execute(
+                    f"DELETE FROM {fts_table} WHERE chunk_id LIKE ?",
+                    (f"{mid}:%",),
+                )
+        if vec_table:
             for mid in mem_ids:
                 conn.execute(
                     "DELETE FROM memory_vectors WHERE memory_id = ?", (mid,)
@@ -564,18 +570,10 @@ def cmd_index_rebuild(args) -> int:
             (args.project_id,),
         ).fetchall()
     else:
-        # Full rebuild.
-        fts_tables = [
-            r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'memory_chunks_fts%'"
-            ).fetchall()
-        ]
-        for t in fts_tables:
-            conn.execute(f"DELETE FROM {t}")
-        vec_exists = conn.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_vectors'"
-        ).fetchone()[0]
-        if vec_exists:
+        # Full rebuild: wipe all index data.
+        if fts_table:
+            conn.execute(f"DELETE FROM {fts_table}")
+        if vec_table:
             conn.execute("DELETE FROM memory_vectors")
         conn.execute("DELETE FROM index_jobs")
         active_rows = conn.execute(

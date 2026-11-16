@@ -43,8 +43,30 @@ variables override TOML values; see `.env.example`.
 | `[security]` | `mcp_allowed_agents`, `admin_token_env` | agent ACL + admin token |
 | `[workers]` | `interval_seconds`, `empty_backoff_seconds` | background indexing loop cadence |
 
-Environment overrides: `AGENT_MEMORY_WORKERS_INTERVAL_SECONDS` and
-`AGENT_MEMORY_WORKERS_EMPTY_BACKOFF_SECONDS` (see `.env.example`).
+Environment overrides: `AGENT_MEMORY_WORKERS_INTERVAL_SECONDS`,
+`AGENT_MEMORY_WORKERS_EMPTY_BACKOFF_SECONDS`, and `SQLITE_VEC_PATH`
+(see `.env.example`).
+
+## Enabling Hybrid Vector Search (sqlite-vec)
+
+Hybrid search combines FTS5 lexical ranking with dense-vector similarity.
+The vector component requires the [sqlite-vec](https://github.com/ashtum/sqlite-vec)
+loadable C extension. Without it the system degrades gracefully to
+lexical-only retrieval; no code changes are required to fall back.
+
+1. Download a prebuilt binary matching your platform from the
+   [sqlite-vec releases page](https://github.com/ashtum/sqlite-vec/releases).
+2. Place the shared object (`vec0.so` / `vec0.dylib`) in a directory,
+   e.g. `/usr/local/lib/sqlite-vec/`.
+3. Set the environment variable:
+   ```bash
+   export SQLITE_VEC_PATH=/usr/local/lib/sqlite-vec/vec0.so
+   ```
+   Alternatively, point it at a directory; the loader will try the common
+   base names (`vec0`, `sqlite_vec`, `vec`) with platform suffixes.
+4. Restart the service.
+5. Verify: `GET /v1/admin/index/status` should report
+   `"vector_available": true` (requires the admin token).
 
 ## Module Layout
 

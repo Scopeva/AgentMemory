@@ -1,8 +1,8 @@
 """Vector index backed by sqlite-vec (graceful fallback when unavailable).
 
-sqlite-vec is loaded as a loadable extension. If it is not available in the
-environment, the index transparently degrades to a no-op and the hybrid
-search falls back to lexical-only.
+sqlite-vec is loaded as a loadable extension via the ``sqlvec`` module.
+If it is not available in the environment, the index transparently
+degrades to a no-op and hybrid search falls back to lexical-only.
 """
 
 from __future__ import annotations
@@ -10,22 +10,31 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-# Attempt to load sqlite-vec extension at module import time.
+from agent_memory.retrieval.sqlvec import load_sqlite_vec
+
+# Probe once at import time using a throwaway in-memory connection.
+# The real per-connection load happens in VectorIndex.__init__ so the
+# virtual table can be created on the live connection that owns it.
 _VEC_AVAILABLE = False
 try:
-    # The extension can be loaded per-connection; we probe once here using
-    # an in-memory connection.
     _probe = sqlite3.connect(":memory:")
-    _probe.enable_load_extension(True)
-    _probe.load_extension("vec0")
+    _VEC_AVAILABLE = load_sqlite_vec(_probe)
     _probe.close()
-    _VEC_AVAILABLE = True
 except Exception:
     _VEC_AVAILABLE = False
 
 
 def vec_available() -> bool:
     return _VEC_AVAILABLE
+
+
+def ensure_vec0(conn: sqlite3.Connection) -> bool:
+    """Load sqlite-vec on a live connection and report success.
+
+    Per-connection: each new sqlite3.Connection must call this before
+    using ``vec0`` virtual tables.
+    """
+    return load_sqlite_vec(conn)
 
 
 class VectorIndex:
@@ -38,12 +47,21 @@ class VectorIndex:
     def __init__(self, conn: sqlite3.Connection, dimension: int = 1024):
         self._conn = conn
         self._dimension = dimension
-        self._enabled = _VEC_AVAILABLE
-        if self._enabled:
-            try:
-                conn.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0("
-                              f"memory_id TEXT, chunk_id TEXT, embedding FLOAT[{dimension}])")
-            except sqlite3.Error:
+        # Per-connection load; the import-time probe tells us whether the
+        # shared object exists anywhere, but each live connection must load
+        # it before the virtual table can be created.
+        self._enabled = False
+        if _VEC_AVAILABLE:
+            if ensure_vec0(conn):
+                try:
+                    conn.execute(
+                        f"CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0("
+                        f"memory_id TEXT, chunk_id TEXT, embedding FLOAT[{dimension}])"
+                    )
+                    self._enabled = True
+                except sqlite3.Error:
+                    self._enabled = False
+            else:
                 self._enabled = False
 
     @property
@@ -53,14 +71,10 @@ class VectorIndex:
     def upsert(self, memory_id: str, chunk_id: str, embedding: list[float]) -> None:
         if not self._enabled:
             return
+        import struct
         self._conn.execute(
             "DELETE FROM memory_vectors WHERE chunk_id = ?", (chunk_id,)
         )
-        blob = bytes(
-            b for v in embedding for b in _float_to_bytes(v)
-        )
-        # sqlite-vec stores embeddings as binary BLOBs
-        import struct
         blob = struct.pack(f"<{len(embedding)}f", *embedding)
         self._conn.execute(
             "INSERT INTO memory_vectors (memory_id, chunk_id, embedding) VALUES (?, ?, ?)",
@@ -105,11 +119,6 @@ class VectorIndex:
             allowed = set(project_filter)
             results = [r for r in results if r["memory_id"] in allowed][:limit]
         return results[:limit]
-
-
-def _float_to_bytes(f: float) -> bytes:
-    import struct
-    return struct.pack("<f", f)
 
 
 def create_vector_index(conn: sqlite3.Connection, dimension: int = 1024) -> VectorIndex:

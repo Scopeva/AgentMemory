@@ -85,6 +85,9 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         # Stop the background loop cleanly on shutdown
         await bg_loop.stop()
         sync_conn.close()
+        # Close the embedding provider's HTTP client (if any) to avoid leaks
+        if embedder is not None and hasattr(embedder, "close"):
+            await embedder.close()
 
     app = FastAPI(
         title="Local Agent Memory & Handoff Service",
@@ -110,3 +113,21 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
 def get_mcp_server() -> mcp_server.FastMCP:
     """Return the FastMCP instance for the MCP transport."""
     return mcp_server
+
+
+def run() -> None:
+    """Run the service under uvicorn (used by ``python -m agent_memory.main``)."""
+    import uvicorn
+
+    config = load_config()
+    app = create_app(config)
+    uvicorn.run(
+        app,
+        host=config.server.host,
+        port=config.server.port,
+        log_level="info",
+    )
+
+
+if __name__ == "__main__":
+    run()

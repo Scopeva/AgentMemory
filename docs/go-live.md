@@ -16,6 +16,13 @@ if c.embedding.enabled:
     resp = httpx.get(f'{c.embedding.normalized_endpoint()}/health', timeout=5)
     print('BGE-M3 status:', resp.status_code)
 "
+
+# Check whether sqlite-vec is loaded (hybrid vector search enabled)
+python -c "
+from agent_memory.retrieval.vector import vec_available
+print('sqlite-vec available:', vec_available())
+"
+# If False and hybrid search is required, set SQLITE_VEC_PATH and restart.
 ```
 
 ### 2. Database Migrations
@@ -39,6 +46,10 @@ curl -s http://127.0.0.1:8765/health/live
 
 # Readiness
 curl -s http://127.0.0.1:8765/health/ready
+
+# Index status (admin token required)
+curl -s http://127.0.0.1:8765/v1/admin/index/status \
+    -H "x-admin-token: $AGENT_MEMORY_ADMIN_TOKEN"
 ```
 
 ### 4. Backup
@@ -54,7 +65,11 @@ python -m memoryctl backup verify --target ~/backups/memory-$(date +%Y%m%d).db
 
 ### 5. Start the Service
 ```bash
-# Single process (development)
+# Direct module entrypoint (recommended for development)
+python -m agent_memory.main
+# → uvicorn binds the [server] host/port from config.toml
+
+# Or uvicorn directly
 python -m uvicorn agent_memory.main:create_app --factory \
     --host 127.0.0.1 --port 8765
 
@@ -102,8 +117,27 @@ a.close()
 
 ### 7. Index Health
 ```bash
+# Human-readable snapshot
 python -m memoryctl index status
-python -m memoryctl jobs retry  # if any pending index jobs
+
+# Scriptable JSON output (CI / dashboards)
+python -m memoryctl index status --json
+
+# Drain a backlog of pending index jobs in one batch
+python -m memoryctl index drain --batch-size 200
+
+# Rebuild the full index (or just one project's chunks)
+python -m memoryctl index rebuild
+python -m memoryctl index rebuild --project-id my-project
+
+# Reset specific failed jobs back to pending
+python -m memoryctl jobs retry <job-id>
+# Reset all failed jobs
+python -m memoryctl jobs retry --all
+
+# (HTTP equivalent, requires admin token)
+curl -X POST http://127.0.0.1:8765/v1/admin/jobs/<job-id>/retry \
+    -H "x-admin-token: $AGENT_MEMORY_ADMIN_TOKEN"
 ```
 
 ### 8. Governance Review
@@ -138,13 +172,15 @@ Structured JSON logs to stdout. Key fields:
 ### Metrics
 | Metric | Source | Alert Threshold |
 |--------|--------|-----------------|
-| Pending index jobs | `/v1/admin/index/status` | > 100 |
+| Pending index jobs | `GET /v1/admin/index/status` | > 100 |
+| Vector availability | `GET /v1/admin/index/status` → `vector_available` | False if hybrid expected |
 | Spool pending events | `~/.local/state/agent-memory/<agent>/meta.json` | > 1000 |
 | DB file size | `du -h memory.db` | > 5 GB |
 | Backup age | `ls -lt ~/backups/` | > 7 days |
 
 ### Alerting
 - BGE-M3 endpoint unreachable for > 5 min → retrieval degrades to lexical-only
-- Pending index jobs > 100 → dispatcher stuck
+- `vector_available: false` when hybrid search expected → check `SQLITE_VEC_PATH`
+- Pending index jobs > 100 → dispatcher stuck; run `memoryctl index drain`
 - Spool > 1000 events → server unreachable
 - DB integrity_check failure → restore from backup immediately
