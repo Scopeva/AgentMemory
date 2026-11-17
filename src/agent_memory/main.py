@@ -5,10 +5,13 @@ from __future__ import annotations
 import logging
 import sqlite3
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from agent_memory.config import AppConfig, load_config
 from agent_memory.logging import setup_logging
@@ -23,6 +26,33 @@ from agent_memory.retrieval.search import SearchService
 from agent_memory.workers import BackgroundIndexingLoop
 
 logger = logging.getLogger(__name__)
+
+# Path to the bundled web dashboard (web/ directory in the repo).
+_WEB_DIR = Path(__file__).parent.parent.parent / "web"
+
+
+def _mount_web_ui(app: FastAPI) -> None:
+    """Serve the web dashboard at / and /assets/.
+
+    The dashboard is a single-page app built with Vite. index.html is
+    served at /; /assets/* is mounted as static files.
+    """
+    if not _WEB_DIR.is_dir():
+        logger.info("web/ directory not found — dashboard disabled")
+        return
+
+    # Serve hashed asset files (JS, CSS)
+    assets_dir = _WEB_DIR / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    # Serve index.html at /
+    index_path = _WEB_DIR / "index.html"
+    if index_path.is_file():
+
+        @app.get("/", include_in_schema=False)
+        async def serve_index() -> FileResponse:
+            return FileResponse(str(index_path))
 
 # Fallback CORS origins when config.server.cors_origins is empty.
 _DEFAULT_CORS_ORIGINS = [
@@ -127,6 +157,9 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     # Phase 4: retrieval search + knowledge index admin ops
     app.include_router(retrieval_api.router, tags=["retrieval"])
     app.include_router(retrieval_api.admin_router, tags=["retrieval-admin"])
+
+    # Serve the web dashboard at / (no-op if web/ dir is missing)
+    _mount_web_ui(app)
 
     # FastMCP is exposed separately (stdio or streamable-http transport).
     # In this skeleton, the FastAPI app provides the HTTP channel; the MCP
