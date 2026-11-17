@@ -19,6 +19,7 @@ class ServerConfig:
     host: str = "127.0.0.1"
     port: int = 8765
     transport: str = "streamable-http"
+    cors_origins: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -120,6 +121,8 @@ def _apply_env_overrides(config: AppConfig, env: dict[str, str]) -> AppConfig:
             config.workers.empty_backoff_seconds = float(backoff)
         except ValueError:
             pass
+    if origins := env.get("AGENT_MEMORY_CORS_ORIGINS"):
+        config.server.cors_origins = [o.strip() for o in origins.split(",") if o.strip()]
     return config
 
 

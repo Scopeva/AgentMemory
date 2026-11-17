@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from agent_memory.config import AppConfig, load_config
 from agent_memory.logging import setup_logging
@@ -22,6 +23,20 @@ from agent_memory.retrieval.search import SearchService
 from agent_memory.workers import BackgroundIndexingLoop
 
 logger = logging.getLogger(__name__)
+
+# Fallback CORS origins when config.server.cors_origins is empty.
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://uevfsysi2ejhbbsjqwegilhsmm0vbqzf.lambda-url.ap-southeast-1.on.aws",
+]
+
+
+def _resolve_cors_origins(config: AppConfig) -> list[str]:
+    """Prefer config value (TOML + env); fall back to defaults."""
+    if config.server.cors_origins:
+        return config.server.cors_origins
+    return _DEFAULT_CORS_ORIGINS
 
 
 def create_app(config: Optional[AppConfig] = None) -> FastAPI:
@@ -93,6 +108,16 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         title="Local Agent Memory & Handoff Service",
         lifespan=lifespan,
     )
+
+    # CORS: allow the web dashboard and local dev server
+    cors_origins = _resolve_cors_origins(config)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+
     app.state.config = config
     app.state.db = db
 

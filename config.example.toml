@@ -2,6 +2,14 @@
 host = "127.0.0.1"
 port = 8765
 transport = "streamable-http"
+# CORS: comma-separated list of origins allowed to call the HTTP API
+# from a browser (e.g. the web dashboard). Override via
+# AGENT_MEMORY_CORS_ORIGINS env var instead of editing this file.
+cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://uevfsysi2ejhbbsjqwegilhsmm0vbqzf.lambda-url.ap-southeast-1.on.aws",
+]
 
 [database]
 path = "~/.local/share/agent-memory/memory.db"
