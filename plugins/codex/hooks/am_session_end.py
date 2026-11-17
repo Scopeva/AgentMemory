@@ -4,6 +4,9 @@
 Fires when the main thread ends. Codex gives this hook at most 3 seconds,
 so we only flush the local spool (no network) and let the next SessionStart
 resend. This is the at-least-once delivery guarantee.
+
+All shared plumbing (sys.path bootstrap, env-var config) lives in
+``_bootstrap.py`` in the same directory.
 """
 
 from __future__ import annotations
@@ -13,21 +16,14 @@ import os
 import sys
 
 
-def _bootstrap() -> None:
-    root = os.environ.get("AGENT_MEMORY_REPO_ROOT")
-    if root:
-        sys.path.insert(0, root)
-        return
-    here = os.path.dirname(os.path.abspath(__file__))
-    candidate = os.path.abspath(os.path.join(here, "..", "..", ".."))
-    if os.path.isdir(os.path.join(candidate, "adapters")):
-        sys.path.insert(0, candidate)
-
-
 def main() -> int:
+    _here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, _here)
+    from _bootstrap import _bootstrap, make_config  # type: ignore
+
     _bootstrap()
     try:
-        from adapters.codex.codex_adapter import CodexAdapter, CodexAdapterConfig
+        from adapters.codex.codex_adapter import CodexAdapter
     except ImportError as exc:
         print(f"[am-codex] adapter import failed: {exc}", file=sys.stderr)
         return 0
@@ -38,13 +34,7 @@ def main() -> int:
     except json.JSONDecodeError:
         data = {}
 
-    cfg = CodexAdapterConfig(
-        server_url=os.environ.get("AGENT_MEMORY_SERVER_URL", "http://127.0.0.1:8765"),
-        project_id=os.environ.get("AGENT_MEMORY_PROJECT_ID"),
-        workspace_id=os.environ.get("AGENT_MEMORY_WORKSPACE_ID"),
-        task_id=os.environ.get("AGENT_MEMORY_TASK_ID"),
-    )
-    a = CodexAdapter(cfg)
+    a = CodexAdapter(make_config())
     sid = data.get("session_id", "")
     a.on_session_end(sid)  # flushes spool locally (fast, no network)
     a.close()

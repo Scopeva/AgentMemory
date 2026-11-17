@@ -9,8 +9,8 @@
 #   - Project: <project>/.opencode/plugin/
 #
 # This script copies agent-memory.ts into the global dir so it applies to
-# every OpenCode session. The bridge script stays in the repo; the TS
-# plugin invokes it via AGENT_MEMORY_REPO_ROOT.
+# every OpenCode session. The batch bridge (opencode_bridge_batch.py)
+# stays in the repo; the TS plugin spawns it and pipes events over stdin.
 
 set -euo pipefail
 

@@ -24,6 +24,7 @@ CODEX_HOOK_DIR="${CODEX_HOME:-$HOME/.codex}/hooks"
 mkdir -p "$CODEX_HOOK_DIR"
 
 echo "==> Copying hook scripts to $CODEX_HOOK_DIR"
+cp "${SCRIPT_DIR}/hooks/_bootstrap.py"      "$CODEX_HOOK_DIR/"
 cp "${SCRIPT_DIR}/hooks/am_session_start.py" "$CODEX_HOOK_DIR/"
 cp "${SCRIPT_DIR}/hooks/am_pre_compact.py"  "$CODEX_HOOK_DIR/"
 cp "${SCRIPT_DIR}/hooks/am_stop.py"         "$CODEX_HOOK_DIR/"

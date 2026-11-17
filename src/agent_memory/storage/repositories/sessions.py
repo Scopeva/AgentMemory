@@ -72,12 +72,15 @@ async def list_sessions_by_workspace(
         ]
 
 
-async def start_run(db: Database, run: Run) -> Run:
+async def start_run(db: Database, run: Run, project_id: Optional[str] = None) -> Run:
+    """Insert a new run row. ``project_id`` is denormalized for cheap
+    per-project run reporting; it may be NULL for legacy rows."""
     now = _utcnow()
     async with db.connection() as conn:
         await conn.execute(
-            "INSERT INTO runs (run_id, task_id, session_id, status, head_sha_start, head_sha_end, started_at, ended_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO runs "
+            "(run_id, task_id, session_id, status, head_sha_start, head_sha_end, started_at, ended_at, project_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.run_id,
                 run.task_id,
@@ -87,6 +90,7 @@ async def start_run(db: Database, run: Run) -> Run:
                 run.head_sha_end,
                 now,
                 None,
+                project_id,
             ),
         )
         await conn.commit()

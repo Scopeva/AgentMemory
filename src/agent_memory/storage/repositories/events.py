@@ -34,8 +34,9 @@ async def insert_event(db: Database, event: EventEnvelope) -> bool:
             if await cursor.fetchone():
                 return False
         await conn.execute(
-            "INSERT INTO events (event_id, run_id, event_type, sequence_no, payload_json, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO events "
+            "(event_id, run_id, event_type, sequence_no, payload_json, created_at, project_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 event.event_id,
                 event.run_id,
@@ -43,10 +44,27 @@ async def insert_event(db: Database, event: EventEnvelope) -> bool:
                 event.sequence_no,
                 json.dumps(event.payload, ensure_ascii=False),
                 now,
+                event.project_id,
             ),
         )
         await conn.commit()
         return True
+
+
+def _row_to_dict(r) -> dict:
+    try:
+        payload = json.loads(r["payload_json"])
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    return {
+        "event_id": r["event_id"],
+        "run_id": r["run_id"],
+        "event_type": r["event_type"],
+        "sequence_no": r["sequence_no"],
+        "project_id": r["project_id"] if "project_id" in r.keys() else None,
+        "payload": payload,
+        "created_at": r["created_at"],
+    }
 
 
 async def get_events_by_run(
@@ -54,52 +72,39 @@ async def get_events_by_run(
 ) -> list[dict]:
     async with db.connection() as conn:
         cursor = await conn.execute(
-            "SELECT event_id, run_id, event_type, sequence_no, payload_json, created_at "
+            "SELECT event_id, run_id, event_type, sequence_no, payload_json, created_at, project_id "
             "FROM events WHERE run_id = ? ORDER BY sequence_no ASC, created_at ASC LIMIT ?",
             (run_id, limit),
         )
         rows = await cursor.fetchall()
-        results = []
-        for r in rows:
-            try:
-                payload = json.loads(r["payload_json"])
-            except (TypeError, json.JSONDecodeError):
-                payload = {}
-            results.append(
-                {
-                    "event_id": r["event_id"],
-                    "run_id": r["run_id"],
-                    "event_type": r["event_type"],
-                    "sequence_no": r["sequence_no"],
-                    "payload": payload,
-                    "created_at": r["created_at"],
-                }
-            )
-        return results
+        return [_row_to_dict(r) for r in rows]
+
+
+async def get_events_by_project(
+    db: Database, project_id: str, limit: int = 100
+) -> list[dict]:
+    """Return events belonging to a specific project, newest first."""
+    async with db.connection() as conn:
+        cursor = await conn.execute(
+            "SELECT event_id, run_id, event_type, sequence_no, payload_json, created_at, project_id "
+            "FROM events WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
+            (project_id, limit),
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_dict(r) for r in rows]
 
 
 async def get_event(db: Database, event_id: str) -> Optional[dict]:
     async with db.connection() as conn:
         cursor = await conn.execute(
-            "SELECT event_id, run_id, event_type, sequence_no, payload_json, created_at "
+            "SELECT event_id, run_id, event_type, sequence_no, payload_json, created_at, project_id "
             "FROM events WHERE event_id = ?",
             (event_id,),
         )
         row = await cursor.fetchone()
         if not row:
             return None
-        try:
-            payload = json.loads(row["payload_json"])
-        except (TypeError, json.JSONDecodeError):
-            payload = {}
-        return {
-            "event_id": row["event_id"],
-            "run_id": row["run_id"],
-            "event_type": row["event_type"],
-            "sequence_no": row["sequence_no"],
-            "payload": payload,
-            "created_at": row["created_at"],
-        }
+        return _row_to_dict(row)
 
 
 async def get_events_by_type(
@@ -107,25 +112,9 @@ async def get_events_by_type(
 ) -> list[dict]:
     async with db.connection() as conn:
         cursor = await conn.execute(
-            "SELECT event_id, run_id, event_type, sequence_no, payload_json, created_at "
+            "SELECT event_id, run_id, event_type, sequence_no, payload_json, created_at, project_id "
             "FROM events WHERE event_type = ? ORDER BY created_at DESC LIMIT ?",
             (event_type, limit),
         )
         rows = await cursor.fetchall()
-        results = []
-        for r in rows:
-            try:
-                payload = json.loads(r["payload_json"])
-            except (TypeError, json.JSONDecodeError):
-                payload = {}
-            results.append(
-                {
-                    "event_id": r["event_id"],
-                    "run_id": r["run_id"],
-                    "event_type": r["event_type"],
-                    "sequence_no": r["sequence_no"],
-                    "payload": payload,
-                    "created_at": r["created_at"],
-                }
-            )
-        return results
+        return [_row_to_dict(r) for r in rows]

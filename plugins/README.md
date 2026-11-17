@@ -9,6 +9,7 @@ the durable spool.
 plugins/
 ├── codex/
 │   ├── hooks/
+│   │   ├── _bootstrap.py        # shared sys.path + env config helper
 │   │   ├── am_session_start.py
 │   │   ├── am_pre_compact.py
 │   │   ├── am_stop.py
@@ -16,8 +17,9 @@ plugins/
 │   │   └── hooks.json           # Codex hooks config template
 │   └── install_codex.sh
 ├── opencode/
-│   ├── agent-memory.ts          # OpenCode TypeScript plugin
-│   ├── opencode_bridge.py       # bridge shell-out target
+│   ├── agent-memory.ts          # OpenCode TypeScript plugin (batch mode)
+│   ├── opencode_bridge.py       # single-event bridge (legacy, kept for reference)
+│   ├── opencode_bridge_batch.py # long-lived batch bridge (one process, many events)
 │   └── install_opencode.sh
 └── pi/
     ├── pi_extension.py          # installable Pi extension entry
@@ -106,9 +108,10 @@ Then in the Codex CLI:
 What happens:
 1. `agent-memory.ts` is copied to `~/.config/opencode/plugin/` (or
    `$OPENCODE_PLUGIN_DIR` if set).
-2. The TS plugin shells out to `plugins/opencode/opencode_bridge.py`
-   via `execFileSync` — the bridge reads the same env vars and imports
-   the adapter.
+2. The TS plugin spawns **one** long-lived Python bridge
+   (`opencode_bridge_batch.py`) and pipes every event to its stdin as
+   a JSON line — no per-message process fork. The bridge persists +
+   flushes internally, closing on session end.
 3. OpenCode loads the plugin automatically on startup. No further
    install step.
 
