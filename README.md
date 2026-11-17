@@ -92,11 +92,31 @@ side.
 
 ### 1. Start the Server
 
+Run one of these (whichever matches your deployment):
+
+**Option A — bare process (dev / quick test)**
 ```bash
-# Terminal A — start the memory service
 python -m agent_memory.main
-# → FastAPI on 127.0.0.1:8765 + FastMCP (MCP endpoint)
+# → FastAPI on 127.0.0.1:8765
 ```
+
+**Option B — Docker (recommended for host agent use)**
+```bash
+docker compose up -d
+# → maps host 127.0.0.1:8765 to the container's service port
+```
+See `docker-compose.yml` in the repo. The compose file wires:
+- port mapping `8765:8765` (host → container)
+- a persistent volume `memory-data:/data` (SQLite survives restarts)
+- `extra_hosts: host.docker.internal:host-gateway` (Linux only, so the
+  container can reach a host-side BGE-M3 service)
+- an optional commented line for mounting `SQLITE_VEC_PATH`
+
+> **How the host agent reaches the container:** Docker's port mapping
+> publishes the container's port on the host's loopback. No special URL is
+> needed on the agent side — it just points at `127.0.0.1:8765` on the host.
+> (This is the *container → host* direction for BGE-M3; *host → container*
+> for agents goes through the published port, and the agent lives on the host.)
 
 ### 2. Set Shared Env Vars (all three agents)
 
@@ -112,6 +132,13 @@ export AGENT_MEMORY_SPOOL_ROOT=~/.local/state/agent-memory
 These come from `adapters/shared/event_client.py` — every adapter
 (Pi / Codex / OpenCode) reads the same four vars, so a single shell profile
 or `.env` file works for all of them.
+
+**Docker note:** `AGENT_MEMORY_SERVER_URL` is read by the *host* agent,
+not the container. It must always be a host-reachable address — for the
+default compose setup that's `http://127.0.0.1:8765`. If you remap the
+host port in compose, update this env var to match (the container-side
+BGE-M3 URL is a separate setting, `AGENT_MEMORY_EMBEDDING_ENDPOINT`, that
+uses `host.docker.internal:8001`).
 
 ### 3. Pi
 
