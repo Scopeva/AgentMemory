@@ -84,6 +84,122 @@ src/agent_memory/
 └── workers/         # BackgroundIndexingLoop (outbox drain)
 ```
 
+## Connecting Your Agents
+
+The memory server runs locally; agents talk to it over HTTP. Each adapter
+reads its settings from environment variables — no TOML file on the agent
+side.
+
+### 1. Start the Server
+
+```bash
+# Terminal A — start the memory service
+python -m agent_memory.main
+# → FastAPI on 127.0.0.1:8765 + FastMCP (MCP endpoint)
+```
+
+### 2. Set Shared Env Vars (all three agents)
+
+```bash
+export AGENT_MEMORY_SERVER_URL=http://127.0.0.1:8765
+export AGENT_MEMORY_PROJECT_ID=my-project        # which project's memory
+export AGENT_MEMORY_WORKSPACE_ID=main            # worktree / branch id
+export AGENT_MEMORY_TASK_ID=feat-x               # optional logical task
+# Spool location (optional, defaults to ~/.local/state/agent-memory/<agent>)
+export AGENT_MEMORY_SPOOL_ROOT=~/.local/state/agent-memory
+```
+
+These come from `adapters/shared/event_client.py` — every adapter
+(Pi / Codex / OpenCode) reads the same four vars, so a single shell profile
+or `.env` file works for all of them.
+
+### 3. Pi
+
+Pi supports extensions; wire the lifecycle hooks to
+`adapters/pi/pi_extension.py`:
+
+```python
+# Inside your Pi extension entry point
+import sys
+sys.path.insert(0, "<repo>/adapters/pi")
+from pi_extension import (
+    on_session_start, on_run_started, on_turn_end,
+    on_session_before_compact, on_run_settled,
+    submit_extraction_result, on_run_interrupted, on_session_shutdown,
+    get_capabilities,
+)
+```
+
+Call each hook at the corresponding Pi lifecycle point. `on_run_settled`
+returns `{"extract": true}` when it thinks extraction is warranted; then
+the model produces the structured result and you call
+`submit_extraction_result` to persist it.
+
+### 4. Codex
+
+Codex is hooks-based and observe-only (no extraction). Inside each Codex
+hook script:
+
+```python
+import sys, os
+sys.path.insert(0, "<repo>/adapters/codex")
+from codex_adapter import CodexAdapter, CodexAdapterConfig
+
+adapter = CodexAdapter(CodexAdapterConfig(
+    project_id=os.environ.get("AGENT_MEMORY_PROJECT_ID"),
+    workspace_id=os.environ.get("AGENT_MEMORY_WORKSPACE_ID"),
+    task_id=os.environ.get("AGENT_MEMORY_TASK_ID"),
+))
+
+# SessionStart hook:
+adapter.on_session_start(session_id, native_session_id, head_sha)
+# PreCompact hook:
+adapter.on_pre_compact(session_id, summary)
+# Stop hook:
+adapter.on_stop(session_id, outcome="completed", head_sha_end=head_sha)
+# SessionEnd hook:
+adapter.on_session_end(session_id)   # flushes spool
+```
+
+### 5. OpenCode
+
+OpenCode supports project-level plugins; also observe-only. In your plugin:
+
+```python
+import sys, os
+sys.path.insert(0, "<repo>/adapters/opencode")
+from opencode_adapter import OpenCodeAdapter, OpenCodeAdapterConfig
+
+adapter = OpenCodeAdapter(OpenCodeAdapterConfig(
+    project_id=os.environ.get("AGENT_MEMORY_PROJECT_ID"),
+    workspace_id=os.environ.get("AGENT_MEMORY_WORKSPACE_ID"),
+    task_id=os.environ.get("AGENT_MEMORY_TASK_ID"),
+))
+
+# onSessionStart:
+adapter.on_session_start(session_id, native_session_id, head_sha)
+# onTurnStart / onTurnEnd:
+adapter.on_turn_start(run_id, session_id)
+adapter.on_turn_end(run_id, session_id)
+# onSessionEnd:
+adapter.on_session_end(session_id, outcome="completed", head_sha_end=head_sha)
+```
+
+### 6. Verify
+
+```bash
+# Watch events arriving while an agent runs
+python -m memoryctl index status --json
+# Should show pending_index_jobs increasing, then draining as the
+# background loop processes them.
+
+# Search what was captured
+python -m memoryctl memory search --project-id my-project "query"
+
+# Inspect a specific memory
+python -m memoryctl memory inspect <memory_id>
+```
+
 ## CLI (`memoryctl`)
 
 ```
