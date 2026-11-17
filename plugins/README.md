@@ -32,7 +32,8 @@ the agent:
 ```bash
 export AGENT_MEMORY_REPO_ROOT=/path/to/AgentMemory
 export AGENT_MEMORY_SERVER_URL=http://127.0.0.1:8765   # host-side Docker: same
-export AGENT_MEMORY_PROJECT_ID=my-project
+# 可选：不设 AGENT_MEMORY_PROJECT_ID 时，会自动取当前目录 / git 仓库名
+export AGENT_MEMORY_PROJECT_ID=my-project              # 可选，覆盖自动探测
 export AGENT_MEMORY_WORKSPACE_ID=main                    # optional
 export AGENT_MEMORY_TASK_ID=feat-x                       # optional
 ```
@@ -40,6 +41,13 @@ export AGENT_MEMORY_TASK_ID=feat-x                       # optional
 `AGENT_MEMORY_REPO_ROOT` is what lets the hook scripts / TS plugin import
 the `adapters` package at runtime. Without it, each plugin falls back to
 auto-detecting the repo by walking up from its own location.
+
+`AGENT_MEMORY_PROJECT_ID` is **optional**: when unset, the adapter
+auto-detects it from your working directory (git repo basename, or CWD
+name). This means different checkouts of different repos map to
+different memory namespaces automatically — no per-project env juggling.
+Set the variable explicitly to override (e.g. to use a stable name
+across several local directories of the same logical project).
 
 ## Codex
 

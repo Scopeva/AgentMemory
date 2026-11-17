@@ -29,6 +29,10 @@ from adapters.pi.pi_adapter import (
 
 def _make_adapter() -> PiAdapter:
     project_id = os.environ.get("AGENT_MEMORY_PROJECT_ID")
+    # Fallback: auto-detect from CWD when env var is not set
+    if not project_id:
+        from adapters.shared.event_client import detect_project_id
+        project_id = detect_project_id()
     workspace_id = os.environ.get("AGENT_MEMORY_WORKSPACE_ID")
     task_id = os.environ.get("AGENT_MEMORY_TASK_ID")
     spool_root = os.environ.get("AGENT_MEMORY_SPOOL_ROOT")

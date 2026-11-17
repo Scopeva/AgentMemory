@@ -19,7 +19,12 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
-from adapters.shared.event_client import DurableSpool, EventClient, build_event
+from adapters.shared.event_client import (
+    DurableSpool,
+    EventClient,
+    build_event,
+    detect_project_id,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +39,11 @@ class CodexAdapterConfig:
         default_factory=lambda: os.environ.get("AGENT_MEMORY_SERVER_URL", "http://127.0.0.1:8765")
     )
     spool_root: Optional[str] = None
-    project_id: Optional[str] = None
+    project_id: Optional[str] = field(
+        default_factory=lambda: detect_project_id(
+            os.environ.get("AGENT_MEMORY_PROJECT_ID")
+        )
+    )
     workspace_id: Optional[str] = None
     task_id: Optional[str] = None
 

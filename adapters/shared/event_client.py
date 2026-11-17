@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -15,6 +16,42 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+
+
+# ---------------------------------------------------------------------------
+# Auto project-id detection
+# ---------------------------------------------------------------------------
+
+
+def detect_project_id(explicit: Optional[str] = None) -> Optional[str]:
+    """Resolve the agent's project_id.
+
+    Priority:
+      1. ``explicit`` value passed by the caller
+      2. ``AGENT_MEMORY_PROJECT_ID`` env var
+      3. Git repo name (``basename $(git rev-parse --show-toplevel)``)
+         — only when CWD is inside a git checkout.
+      4. Current working directory name
+
+    This lets the user skip the env var entirely: each project checkout
+    automatically maps to its own memory namespace.
+    """
+    if explicit:
+        return explicit
+    env = os.environ.get("AGENT_MEMORY_PROJECT_ID", "").strip()
+    if env:
+        return env
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return Path(out.stdout.strip()).name
+    except Exception:
+        pass
+    cwd = Path.cwd().name
+    return cwd if cwd not in ("", ".", "..") else None
 
 
 # ---------------------------------------------------------------------------
