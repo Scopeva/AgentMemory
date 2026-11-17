@@ -47,6 +47,18 @@ Environment overrides: `AGENT_MEMORY_WORKERS_INTERVAL_SECONDS`,
 `AGENT_MEMORY_WORKERS_EMPTY_BACKOFF_SECONDS`, and `SQLITE_VEC_PATH`
 (see `.env.example`).
 
+### Database Migrations
+
+The schema is managed via SQL migration files in
+`src/agent_memory/storage/migrations/`, applied in lexicographic order
+on startup (tracked in `schema_migrations`).
+
+| File | Description |
+|---|---|
+| `001_initial.sql` | Core tables: projects, runs, tasks, events, knowledge, handoffs, checkpoints, index_jobs |
+| `002_retrieval.sql` | FTS5 `chunks_fts`, `memory_vectors` (vec0 virtual table), `chunk_index` |
+| `003_project_id.sql` | Adds `project_id TEXT` column to `events` and `runs` tables + partial indexes; enables true per-project event isolation |
+
 ## Enabling Hybrid Vector Search (sqlite-vec)
 
 Hybrid search combines FTS5 lexical ranking with dense-vector similarity.
@@ -78,10 +90,27 @@ src/agent_memory/
 ├── main.py          # FastAPI + FastMCP entrypoint (wires bg indexing loop)
 ├── api/             # HTTP event & admin endpoints
 ├── mcp/             # FastMCP server and tool implementations
-├── core/            # Business logic (projects, tasks, handoffs, knowledge)
-├── storage/         # SQLite database, migrations, repositories
-├── retrieval/       # FTS5, sqlite-vec, hybrid search
-└── workers/         # BackgroundIndexingLoop (outbox drain)
+├── core/            # Business logic
+│   ├── agent_capabilities.py   # adapter capability matrix (pi/codex/opencode)
+│   ├── memory_policy.py        # candidate/promotion/governance rules
+│   ├── knowledge_governance.py # supersession, archive, reject flows
+│   └── projects/identity.py   # project_id detection + alias resolution
+├── storage/
+│   ├── database.py            # connection + WAL setup
+│   ├── migrations/           # 001_initial, 002_retrieval, 003_project_id
+│   └── repositories/         # projects, sessions, tasks, events, knowledge, handoffs, checkpoints
+├── retrieval/
+│   ├── chunker.py            # document → chunk splitter
+│   ├── lexical.py            # FTS5 BM25 search
+│   ├── vector.py             # sqlite-vec dense similarity
+│   ├── sqlvec.py             # sqlite-vec loadable-extension loader (graceful degradation)
+│   ├── embedding.py          # BGE-M3 HTTP client
+│   ├── hybrid.py             # RRF fusion of lexical + vector
+│   ├── dispatcher.py         # routing entry point
+│   ├── search.py             # high-level search API
+│   └── indexing.py           # index job worker
+└── workers/
+    └── indexing_loop.py      # BackgroundIndexingLoop (outbox drain)
 ```
 
 ## Connecting Your Agents
@@ -122,16 +151,49 @@ See `docker-compose.yml` in the repo. The compose file wires:
 
 ```bash
 export AGENT_MEMORY_SERVER_URL=http://127.0.0.1:8765
-export AGENT_MEMORY_PROJECT_ID=my-project        # which project's memory
+export AGENT_MEMORY_PROJECT_ID=my-project        # optional — auto-detected if unset
 export AGENT_MEMORY_WORKSPACE_ID=main            # worktree / branch id
 export AGENT_MEMORY_TASK_ID=feat-x               # optional logical task
+export AGENT_MEMORY_REPO_ROOT=/path/to/AgentMemory  # where the repo lives
 # Spool location (optional, defaults to ~/.local/state/agent-memory/<agent>)
 export AGENT_MEMORY_SPOOL_ROOT=~/.local/state/agent-memory
 ```
 
 These come from `adapters/shared/event_client.py` — every adapter
-(Pi / Codex / OpenCode) reads the same four vars, so a single shell profile
+(Pi / Codex / OpenCode) reads the same vars, so a single shell profile
 or `.env` file works for all of them.
+
+#### Project-ID Auto-Detection
+
+`AGENT_MEMORY_PROJECT_ID` is **optional**. When unset (or empty), the
+service auto-detects it in this priority order:
+
+1. `aliases.toml` (see below) — longest-match, glob `*` supported
+2. **git repo name** — runs `git rev-parse --show-toplevel` from the
+   current working directory; the basename of the repo root wins
+3. **cwd basename** — fallback when not inside a git repo
+
+You can also pin it explicitly via `AGENT_MEMORY_PROJECT_ID` (highest
+priority). The detected value is stored in `events.project_id` and
+`runs.project_id` (migration 003), enabling true per-project event
+isolation.
+
+#### Alias Table
+
+Create `~/.config/agent-memory/aliases.toml` (path overridable via
+`AGENT_MEMORY_ALIASES_PATH`):
+
+```toml
+[aliases]
+"*"        = "default"
+"/home/u/work"  = "workspace"
+"/home/u/work/api-*"  = "api"
+"~/notes"  = "notes"
+```
+
+Exact / longest-match wins; glob patterns use `fnmatch` semantics;
+`~` expands to home. Malformed TOML is logged and ignored (service
+continues with no aliases).
 
 **Docker note:** `AGENT_MEMORY_SERVER_URL` is read by the *host* agent,
 not the container. It must always be a host-reachable address — for the
@@ -164,53 +226,51 @@ the model produces the structured result and you call
 
 ### 4. Codex
 
-Codex is hooks-based and observe-only (no extraction). Inside each Codex
-hook script:
+Codex is hooks-based and observe-only (no extraction). Four lifecycle
+hooks are declared in `~/.codex/hooks.json`; each is a thin shell wrapper
+that calls into the shared bootstrap:
 
-```python
-import sys, os
-sys.path.insert(0, "<repo>/adapters/codex")
-from codex_adapter import CodexAdapter, CodexAdapterConfig
-
-adapter = CodexAdapter(CodexAdapterConfig(
-    project_id=os.environ.get("AGENT_MEMORY_PROJECT_ID"),
-    workspace_id=os.environ.get("AGENT_MEMORY_WORKSPACE_ID"),
-    task_id=os.environ.get("AGENT_MEMORY_TASK_ID"),
-))
-
-# SessionStart hook:
-adapter.on_session_start(session_id, native_session_id, head_sha)
-# PreCompact hook:
-adapter.on_pre_compact(session_id, summary)
-# Stop hook:
-adapter.on_stop(session_id, outcome="completed", head_sha_end=head_sha)
-# SessionEnd hook:
-adapter.on_session_end(session_id)   # flushes spool
 ```
+~/.codex/hooks/
+├── _bootstrap.py          # shared: sys.path setup, env, project_id detection
+├── am_session_start.py    # SessionStart  → CodexAdapter.on_session_start()
+├── am_pre_compact.py      # PreCompact    → CodexAdapter.on_pre_compact()
+├── am_stop.py             # Stop          → CodexAdapter.on_stop()
+├── am_session_end.py      # SessionEnd    → CodexAdapter.on_session_end()
+└── …
+```
+
+All four `am_*.py` scripts call `_bootstrap()` from `_bootstrap.py`
+(deduped — no more 50-line copy-paste per hook). The bootstrap reads the
+same env vars and auto-detects `project_id` via the alias table when
+`AGENT_MEMORY_PROJECT_ID` is unset.
+
+**Install:** `bash plugins/codex/install_codex.sh` copies the hooks to
+`~/.codex/hooks/` and merges entries into `~/.codex/hooks.json` (run
+`/hooks` in Codex CLI once to trust them).
 
 ### 5. OpenCode
 
-OpenCode supports project-level plugins; also observe-only. In your plugin:
+OpenCode supports project-level TypeScript plugins; also observe-only.
+The plugin uses a **long-lived batch bridge** — one Python process per
+session, not one per message:
 
-```python
-import sys, os
-sys.path.insert(0, "<repo>/adapters/opencode")
-from opencode_adapter import OpenCodeAdapter, OpenCodeAdapterConfig
-
-adapter = OpenCodeAdapter(OpenCodeAdapterConfig(
-    project_id=os.environ.get("AGENT_MEMORY_PROJECT_ID"),
-    workspace_id=os.environ.get("AGENT_MEMORY_WORKSPACE_ID"),
-    task_id=os.environ.get("AGENT_MEMORY_TASK_ID"),
-))
-
-# onSessionStart:
-adapter.on_session_start(session_id, native_session_id, head_sha)
-# onTurnStart / onTurnEnd:
-adapter.on_turn_start(run_id, session_id)
-adapter.on_turn_end(run_id, session_id)
-# onSessionEnd:
-adapter.on_session_end(session_id, outcome="completed", head_sha_end=head_sha)
 ```
+plugins/opencode/
+├── agent-memory.ts            # OpenCode plugin entry point (TypeScript)
+├── opencode_bridge_batch.py   # long-lived bridge: reads stdin lines, flushes on exit
+└── opencode_bridge.py         # legacy single-event bridge (kept for reference)
+```
+
+`agent-memory.ts` spawns `opencode_bridge_batch.py` once on
+`session.start`; every subsequent event (`chat.message`, `session.end`,
+etc.) is piped as a JSON line into that single process's stdin. The
+bridge accumulates events and flushes all of them to the server on
+`session.end` (or when the process is killed). This eliminates the
+per-message process-fork overhead that the old per-event bridge had.
+
+**Install:** `bash plugins/opencode/install_opencode.sh` copies the
+plugin to `~/.config/opencode/plugin/agent-memory.ts`.
 
 ### 6. Verify
 
