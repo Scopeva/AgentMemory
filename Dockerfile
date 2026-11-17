@@ -10,7 +10,8 @@ RUN pip install --no-cache-dir .
 
 # Default data directory; override with a volume for persistence.
 ENV AGENT_MEMORY_CONFIG_PATH=/app/config.example.toml \
-    AGENT_MEMORY_DATABASE_PATH=/data/memory.db
+    AGENT_MEMORY_DATABASE_PATH=/data/memory.db \
+    PYTHONPATH=/app/src
 
 # sqlite-vec: point at the shared object to enable hybrid vector search.
 # Without it the service runs in lexical-only mode.
@@ -20,4 +21,10 @@ VOLUME /data
 
 EXPOSE 8765
 
-CMD ["python", "-m", "agent_memory.main"]
+# Use the interpreter that actually has the packages installed.
+# pip installs into /usr/local/lib/python3.11/site-packages/ (system python),
+# not the venv the base image may have pre-baked.
+CMD ["python3", "-m", "agent_memory.main"]
+
+# Keep the container running for interactive use (docker compose exec / attach).
+# Use `docker compose exec agent-memory python -m memoryctl ...` for one-shot commands.
