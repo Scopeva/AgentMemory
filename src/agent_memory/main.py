@@ -157,6 +157,10 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     # Phase 4: retrieval search + knowledge index admin ops
     app.include_router(retrieval_api.router, tags=["retrieval"])
     app.include_router(retrieval_api.admin_router, tags=["retrieval-admin"])
+    # Browser-facing list endpoints for the web dashboard
+    from agent_memory.api import browsing as browsing_api
+
+    app.include_router(browsing_api.router, tags=["browsing"])
 
     # Serve the web dashboard at / (no-op if web/ dir is missing)
     _mount_web_ui(app)
