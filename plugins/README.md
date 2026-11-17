@@ -49,6 +49,34 @@ different memory namespaces automatically — no per-project env juggling.
 Set the variable explicitly to override (e.g. to use a stable name
 across several local directories of the same logical project).
 
+### Project-id alias table
+
+If you have several local checkouts of the same logical project (say
+`~/code/proj-a` and `~/work/proj-a`) you want them to map to one stable
+`project_id`, create `~/.config/agent-memory/aliases.toml`:
+
+```bash
+./scripts/gen_aliases.sh          # writes a starter file
+$EDITOR ~/.config/agent-memory/aliases.toml
+```
+
+```toml
+[aliases]
+"~/code/proj-a"      = "proj-a"     # absolute path
+"~/work/*/proj-a"    = "proj-a"     # glob (fnmatch)
+"proj-a"             = "proj-a"     # bare-name fallback
+```
+
+Resolution order (most specific wins):
+1. explicit `project_id` argument
+2. `AGENT_MEMORY_PROJECT_ID` env var
+3. alias table (longest-match, wildcards allowed)
+4. git repo basename
+5. CWD basename
+
+Set `AGENT_MEMORY_ALIASES_PATH` to point at a different file (useful in
+tests or team-shared configs checked into the repo).
+
 ## Codex
 
 ```bash

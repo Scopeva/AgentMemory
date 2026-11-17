@@ -29,29 +29,20 @@ def detect_project_id(explicit: Optional[str] = None) -> Optional[str]:
     Priority:
       1. ``explicit`` value passed by the caller
       2. ``AGENT_MEMORY_PROJECT_ID`` env var
-      3. Git repo name (``basename $(git rev-parse --show-toplevel)``)
+      3. Alias table (``~/.config/agent-memory/aliases.toml`` or
+         ``$AGENT_MEMORY_ALIASES_PATH``) — longest-match wins, supports
+         ``~``, relative and ``*`` glob keys.
+      4. Git repo name (``basename $(git rev-parse --show-toplevel)``)
          — only when CWD is inside a git checkout.
-      4. Current working directory name
+      5. Current working directory name
 
     This lets the user skip the env var entirely: each project checkout
-    automatically maps to its own memory namespace.
+    automatically maps to its own memory namespace, and aliases normalize
+    multiple local directories of the same logical project.
     """
-    if explicit:
-        return explicit
-    env = os.environ.get("AGENT_MEMORY_PROJECT_ID", "").strip()
-    if env:
-        return env
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=2,
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            return Path(out.stdout.strip()).name
-    except Exception:
-        pass
-    cwd = Path.cwd().name
-    return cwd if cwd not in ("", ".", "..") else None
+    from adapters.shared.project_id import resolve_project_id
+
+    return resolve_project_id(explicit=explicit)
 
 
 # ---------------------------------------------------------------------------
