@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir .
 # Default data directory; override with a volume for persistence.
 ENV AGENT_MEMORY_CONFIG_PATH=/app/config.example.toml \
     AGENT_MEMORY_DATABASE_PATH=/data/memory.db \
-    PYTHONPATH=/app/src
+    PYTHONPATH=/app/src:/app/cli
 
 # sqlite-vec: point at the shared object to enable hybrid vector search.
 # Without it the service runs in lexical-only mode.
