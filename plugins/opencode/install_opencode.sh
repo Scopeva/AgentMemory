@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# install_opencode.sh — install the agent-memory plugin into OpenCode.
+# install_opencode.sh — install the agent-memory plugin into OpenCode 2.x.
 #
 # Usage (from the repo):
 #   ./plugins/opencode/install_opencode.sh
 #
-# OpenCode loads TypeScript plugins from two places:
-#   - Global:  ~/.config/opencode/plugin/
-#   - Project: <project>/.opencode/plugin/
+# OpenCode 2.x auto-discovers plugins from two places:
+#   - Global:  ~/.config/opencode/plugins/
+#   - Project: <project>/.opencode/plugins/
+# (the 1.x `plugin/` dir is still read, but 2.x recommends `plugins/`)
 #
 # This script copies agent-memory.ts into the global dir so it applies to
 # every OpenCode session. The batch bridge (opencode_bridge_batch.py)
@@ -17,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-PLUGIN_DIR="${OPENCODE_PLUGIN_DIR:-$HOME/.config/opencode/plugin}"
+PLUGIN_DIR="${OPENCODE_PLUGIN_DIR:-$HOME/.config/opencode/plugins}"
 mkdir -p "$PLUGIN_DIR"
 
 echo "==> Copying plugin to $PLUGIN_DIR/agent-memory.ts"

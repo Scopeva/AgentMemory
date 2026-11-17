@@ -1,9 +1,14 @@
 /**
- * agent-memory plugin for OpenCode.
+ * agent-memory plugin for OpenCode (V2 API).
  *
- * Drop this file into ~/.config/opencode/plugin/agent-memory.ts (global)
- * or <project>/.opencode/plugin/agent-memory.ts (project-local).
- * OpenCode loads it automatically at startup — no separate install step.
+ * OpenCode 2.x requires the default export to be `Plugin.define({ id, setup })`.
+ * V1-style "function returning a hooks object" plugins are rejected with:
+ *   "Plugin must export a default definition with an id and an effect or setup function."
+ *
+ * Drop this file into:
+ *   ~/.config/opencode/plugins/agent-memory.ts   (global)
+ *   <project>/.opencode/plugins/agent-memory.ts  (project-local)
+ * OpenCode auto-discovers .opencode/plugins/ — no separate install step.
  *
  * How it works (batch bridge, #9):
  * - One long-lived Python bridge process is spawned on first use.
@@ -19,6 +24,7 @@
  *   AGENT_MEMORY_WORKSPACE_ID
  *   AGENT_MEMORY_TASK_ID
  */
+import { Plugin } from "@opencode/plugin";
 import { ChildProcess, spawn } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -70,46 +76,6 @@ function closeBridge(): void {
   }
 }
 
-export default function agentMemoryPlugin() {
-  let sessionStarted = false;
-
-  return {
-    events: {
-      async "session.start"(ctx: { sessionID: string; reason?: string }) {
-        sessionStarted = true;
-        emit("session_start", {
-          session_id: ctx.sessionID,
-          native_session_id: ctx.reason ?? "",
-        });
-      },
-
-      async "chat.message"(ctx: {
-        sessionID: string;
-        messageID: string;
-        info: { role: string };
-      }) {
-        if (!sessionStarted) return;
-        // Every assistant turn is a "turn.end" from the memory model's view.
-        emit("turn_end", {
-          session_id: ctx.sessionID,
-          run_id: ctx.sessionID,
-          turn_index: 0,
-        });
-      },
-
-      async "session.end"(ctx: { sessionID: string; reason?: string }) {
-        emit("session_end", {
-          session_id: ctx.sessionID,
-          outcome: reasonToOutcome(ctx.reason),
-        });
-        sessionStarted = false;
-        // Flush + terminate the bridge for this session.
-        closeBridge();
-      },
-    },
-  };
-}
-
 function reasonToOutcome(reason?: string): string {
   switch (reason) {
     case "completed":
@@ -124,3 +90,66 @@ function reasonToOutcome(reason?: string): string {
       return "completed";
   }
 }
+
+export default Plugin.define({
+  id: "agent-memory",
+
+  async setup(ctx: {
+    event?: {
+      subscribe?: (
+        type: string,
+        handler: (payload: unknown) => void | Promise<void>,
+      ) => void;
+    };
+  }) {
+    const subscribe = ctx.event?.subscribe;
+    if (!subscribe) {
+      // ctx.event is optional; bail quietly if OpenCode has no event bus.
+      return;
+    }
+
+    // Track sessions so we can mark session-scoped turns.
+    const activeSessions = new Set<string>();
+
+    subscribe("session.start", (payload: unknown) => {
+      const p = payload as { sessionID?: string; reason?: string };
+      const sid = p?.sessionID;
+      if (!sid) return;
+      activeSessions.add(sid);
+      emit("session_start", {
+        session_id: sid,
+        native_session_id: p?.reason ?? "",
+      });
+    });
+
+    subscribe("chat.message", (payload: unknown) => {
+      const p = payload as {
+        sessionID?: string;
+        messageID?: string;
+        info?: { role?: string };
+      };
+      const sid = p?.sessionID;
+      if (!sid || !activeSessions.has(sid)) return;
+      // Only record assistant turns as "turn.end" from the memory model's view.
+      if (p?.info?.role !== "assistant") return;
+      emit("turn_end", {
+        session_id: sid,
+        run_id: sid,
+        turn_index: 0,
+      });
+    });
+
+    subscribe("session.end", (payload: unknown) => {
+      const p = payload as { sessionID?: string; reason?: string };
+      const sid = p?.sessionID;
+      if (!sid) return;
+      activeSessions.delete(sid);
+      emit("session_end", {
+        session_id: sid,
+        outcome: reasonToOutcome(p?.reason),
+      });
+      // Flush + terminate the bridge for this session.
+      closeBridge();
+    });
+  },
+});
