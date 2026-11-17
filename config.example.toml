@@ -1,5 +1,8 @@
 [server]
-host = "127.0.0.1"
+# For Docker deployment, the service must listen on 0.0.0.0 so the
+# container's port mapping publishes it on the host. For bare-process
+# deployment on the host, set this back to 127.0.0.1 (localhost-only).
+host = "0.0.0.0"
 port = 8765
 transport = "streamable-http"
 # CORS: comma-separated list of origins allowed to call the HTTP API
