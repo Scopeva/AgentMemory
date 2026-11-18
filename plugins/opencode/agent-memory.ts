@@ -40,20 +40,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
-// ── try to load Plugin from the injected @opencode/plugin ─────────────
-// OpenCode injects this package at runtime; a bare import may fail if
-// the plugin is type-checked or loaded outside the OpenCode process.
-let Plugin: { define: (def: unknown) => unknown } | null = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const mod = require("@opencode/plugin");
-  if (mod?.Plugin?.define) {
-    Plugin = mod.Plugin;
-  }
-} catch {
-  // not available — fall through to plain-object export
-}
-
 // ── config from env ────────────────────────────────────────────────────
 const SERVER_URL =
   process.env.AGENT_MEMORY_SERVER_URL ?? "http://127.0.0.1:8765";
@@ -242,15 +228,17 @@ function makeHandlers() {
 }
 
 // ── plugin definition ──────────────────────────────────────────────────
-const id = "agent-memory";
+const ID = "agent-memory";
 
 /**
- * V2 entry point. OpenCode calls `setup(ctx)` when the plugin loads.
+ * V2 entry point. OpenCode 2.x calls `setup(ctx)` when the plugin loads.
  *
- * - If `ctx.event?.subscribe` exists (OpenCode 2.x), register handlers
- *   via the 2.x event bus.
- * - As a V1 fallback, `setup` also returns a 1.x-style hooks object;
- *   OpenCode 1.18.29+ merges it. Harmless in 2.x.
+ * Plain-object `{ id, setup }` shape is what OpenCode 2.0.8+ validates
+ * (a non-object default export — e.g. `Plugin.define()` returning a
+ * Proxy — fails with "must export a default definition ... cause:
+ * SchemaError(Expected object at [\"default\"])"). No dependency on
+ * @opencode/plugin; V1 compatibility comes from returning the legacy
+ * hooks object from `setup`, which 1.18.29+ merges.
  */
 async function setup(ctx: {
   event?: {
@@ -269,7 +257,7 @@ async function setup(ctx: {
     ctx.event.subscribe("session.end", onSessionEnd);
   }
 
-  // 1.x fallback: return hooks object so V1 loader can register them.
+  // 1.x fallback: return hooks object so the V1 loader can register them.
   return {
     events: {
       "session.start": onSessionStart,
@@ -279,7 +267,12 @@ async function setup(ctx: {
   };
 }
 
-// ── default export: prefer Plugin.define, fall back to plain object ───
-const def = { id, setup };
+// Plain object: valid shape for OpenCode 2.x schema validation AND V1
+// (V1 plugins use an `id` + handlers object; the setup return value
+// carries the legacy `events` map).
+const definition: { id: string; setup: typeof setup } = {
+  id: ID,
+  setup,
+};
 
-export default Plugin?.define ? Plugin.define(def) : def;
+export default definition;
