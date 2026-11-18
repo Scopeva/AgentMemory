@@ -144,6 +144,83 @@ def cmd_projects_list(args) -> int:
     return 0
 
 
+def cmd_projects_delete(args) -> int:
+    """Cascade-delete a project and all of its data (FK-safe order).
+
+    Mirrors DELETE /v1/projects/{id} server behavior, so it works even
+    when the API is not running.
+    """
+    cfg = _load_cfg()
+    conn = _connect(cfg)
+    project_id = args.project_id
+
+    # Confirm the project exists (clean error otherwise).
+    row = conn.execute("SELECT 1 FROM projects WHERE project_id = ?", (project_id,)).fetchone()
+    if not row:
+        print(f"error: project {project_id!r} not found")
+        conn.close()
+        return 1
+
+    deleted: dict[str, int] = {}
+
+    # 1. events + checkpoints via this project's runs
+    for table in ("events", "checkpoints"):
+        cur = conn.execute(
+            f"DELETE FROM {table} WHERE run_id IN "
+            f"(SELECT run_id FROM runs WHERE project_id = ?)",
+            (project_id,),
+        )
+        deleted[table] = cur.rowcount or 0
+
+    cur = conn.execute("DELETE FROM runs WHERE project_id = ?", (project_id,))
+    deleted["runs"] = cur.rowcount or 0
+
+    for table in ("handoffs", "tasks"):
+        cur = conn.execute(f"DELETE FROM {table} WHERE project_id = ?", (project_id,))
+        deleted[table] = cur.rowcount or 0
+
+    cur = conn.execute("DELETE FROM knowledge_revisions WHERE project_id = ?", (project_id,))
+    deleted["knowledge_revisions"] = cur.rowcount or 0
+
+    mem_ids = [
+        r[0]
+        for r in conn.execute(
+            "SELECT memory_id FROM knowledge WHERE project_id = ?", (project_id,)
+        ).fetchall()
+    ]
+    cur = conn.execute("DELETE FROM knowledge WHERE project_id = ?", (project_id,))
+    deleted["knowledge"] = cur.rowcount or 0
+
+    cur = conn.execute("DELETE FROM index_jobs WHERE project_id = ?", (project_id,))
+    deleted["index_jobs"] = cur.rowcount or 0
+
+    # FTS5 index — has its own project_id column.
+    cur = conn.execute("DELETE FROM chunks_fts WHERE project_id = ?", (project_id,))
+    deleted["fts_chunks"] = cur.rowcount or 0
+
+    # vec virtual table only exists when sqlite-vec is loaded.
+    try:
+        probe = conn.execute("SELECT 1 FROM memory_vectors LIMIT 1").fetchone()
+        if probe is not None:
+            for mid in mem_ids:
+                conn.execute("DELETE FROM memory_vectors WHERE memory_id = ?", (mid,))
+            deleted["memory_vectors"] = len(mem_ids)
+    except sqlite3.Error:
+        pass  # vec not loaded — nothing to clean
+
+    cur = conn.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
+    deleted["projects"] = cur.rowcount or 0
+
+    conn.commit()
+    conn.close()
+
+    for table, count in deleted.items():
+        print(f"  {table:24s} {count}")
+    print(f"deleted project {project_id!r} "
+          f"({sum(deleted.values())} rows total)")
+    return 0
+
+
 def cmd_tasks_list(args) -> int:
     cfg = _load_cfg()
     conn = _connect(cfg)
@@ -798,6 +875,9 @@ def build_parser() -> argparse.ArgumentParser:
     pl = psub.add_parser("list", help="List projects")
     pl.add_argument("--limit", type=int, default=20)
     pl.set_defaults(func=cmd_projects_list)
+    pd = psub.add_parser("delete", help="Delete a project and all of its data")
+    pd.add_argument("--project-id", required=True)
+    pd.set_defaults(func=cmd_projects_delete)
 
     tp = sub.add_parser("tasks", help="Task inspection")
     tsub = tp.add_subparsers(dest="tasks_cmd", required=True)

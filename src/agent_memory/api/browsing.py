@@ -1,14 +1,14 @@
 """Browser-facing GET endpoints for the web dashboard.
 
 Mounted at /v1 (same prefix as events/retrieval routers).
-All endpoints are read-only; no admin token required.
+Read endpoints are open; DELETE /projects/{id} is admin-gated.
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 
 router = APIRouter(prefix="/v1")
 
@@ -90,6 +90,116 @@ def _project_to_dict(p) -> dict:
         "created_at": getattr(p, "created_at", None),
         "updated_at": getattr(p, "updated_at", None),
     }
+
+
+# ---------------------------------------------------------------------------
+# Project deletion (admin)
+# ---------------------------------------------------------------------------
+
+
+def _check_admin(request: Request, token: Optional[str]) -> None:
+    """Verify admin token against the configured env var (mirrors retrieval._check_admin)."""
+    import os
+
+    config = getattr(request.app.state, "config", None)
+    env_name = config.security.admin_token_env if config else "AGENT_MEMORY_ADMIN_TOKEN"
+    expected = os.environ.get(env_name)
+    if expected and token != expected:
+        raise HTTPException(403, "invalid admin token")
+
+
+@router.delete("/projects/{project_id}")
+async def delete_project(
+    request: Request,
+    project_id: str,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> dict:
+    """Cascade-delete a project and all of its data.
+
+    Requires admin token (X-Admin-Token header). Deletes, in FK order:
+      events, checkpoints, runs, handoffs, tasks,
+      knowledge_revisions, knowledge, index_jobs, FTS/vector index
+      entries, sessions referenced only by this project's runs,
+      finally the project row itself.
+    """
+    from agent_memory.storage.repositories import projects as repo
+
+    _check_admin(request, x_admin_token)
+    db = request.app.state.db
+    existing = await repo.get_project(db, project_id)
+    if existing is None:
+        raise HTTPException(404, f"project {project_id!r} not found")
+
+    async with db.connection() as conn:
+        deleted: dict[str, int] = {}
+
+        # 1. events + checkpoints (via this project's runs)
+        for table in ("events", "checkpoints"):
+            cursor = await conn.execute(
+                f"DELETE FROM {table} WHERE run_id IN "
+                f"(SELECT run_id FROM runs WHERE project_id = ?)",
+                (project_id,),
+            )
+            deleted[table] = cursor.rowcount or 0
+
+        # 2. runs
+        cursor = await conn.execute("DELETE FROM runs WHERE project_id = ?", (project_id,))
+        deleted["runs"] = cursor.rowcount or 0
+
+        # 3. handoffs + tasks
+        for table in ("handoffs", "tasks"):
+            cursor = await conn.execute("DELETE FROM " + table + " WHERE project_id = ?", (project_id,))
+            deleted[table] = cursor.rowcount or 0
+
+        # 4. knowledge + revisions
+        cursor = await conn.execute("DELETE FROM knowledge_revisions WHERE project_id = ?", (project_id,))
+        deleted["knowledge_revisions"] = cursor.rowcount or 0
+
+        mem_ids = [
+            r[0]
+            for r in await (
+                await conn.execute(
+                    "SELECT memory_id FROM knowledge WHERE project_id = ?", (project_id,)
+                )
+            ).fetchall()
+        ]
+        cursor = await conn.execute("DELETE FROM knowledge WHERE project_id = ?", (project_id,))
+        deleted["knowledge"] = cursor.rowcount or 0
+
+        # 5. index jobs + FTS/vector index entries
+        cursor = await conn.execute("DELETE FROM index_jobs WHERE project_id = ?", (project_id,))
+        deleted["index_jobs"] = cursor.rowcount or 0
+
+        # chunks_fts carries its own project_id column — scoped delete.
+        cursor = await conn.execute("DELETE FROM chunks_fts WHERE project_id = ?", (project_id,))
+        deleted["fts_chunks"] = cursor.rowcount or 0
+
+        # memory_vectors is a vec0 virtual table — only present when the
+        # sqlite-vec extension is loaded at runtime.
+        try:
+            cursor = await conn.execute(
+                "SELECT 1 FROM memory_vectors LIMIT 1"
+            )
+            await cursor.fetchone()
+            for mid in mem_ids:
+                cursor = await conn.execute(
+                    "DELETE FROM memory_vectors WHERE memory_id = ?", (mid,)
+                )
+            deleted["memory_vectors"] = len(mem_ids)
+        except Exception:
+            pass  # vec not loaded — nothing to clean
+
+        # 6. sessions referenced ONLY by this project's runs are already
+        #    deleted above; sessions are not project-scoped — keep them.
+        #    (Runs are the project-scoped boundary; a session may span projects.)
+
+        # 7. the project row itself
+        cursor = await conn.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
+        deleted["projects"] = cursor.rowcount or 0
+
+        await conn.commit()
+
+    return {"project_id": project_id, "deleted": deleted, "removed": any(v for v in deleted.values() if v)}
 
 
 # ---------------------------------------------------------------------------
