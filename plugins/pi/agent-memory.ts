@@ -1,23 +1,28 @@
 /**
  * agent-memory extension for Pi (TypeScript, no Python dependency).
  *
- * This replaces the old Python-based pi_extension.py + _pi_helper.py
- * approach which had environment issues inside Pi's JS/TS runtime.
+ * Pi extensions export a default factory function that receives
+ * ExtensionAPI. The factory registers event handlers via pi.on().
  *
  * How it works:
- *   - One long-lived "batch bridge": events are buffered in-memory
- *     and flushed to the server's POST /v1/events/batch endpoint at
- *     session end (or periodically). No subprocess, no Python.
- *   - If the server is unreachable, events are written to a local
- *     spool file (~/.local/state/agent-memory/pi/spool.jsonl) and
- *     retried on next flush.
+ *   - Events are buffered in memory and flushed to the server's
+ *     POST /v1/events/batch endpoint at session shutdown.
+ *   - If the server is unreachable, events are spooled to a local
+ *     JSONL file (~/.local/state/agent-memory/pi/spool.jsonl) and
+ *     retried on the next flush.
  *
  * Env vars:
  *   AGENT_MEMORY_SERVER_URL   default http://127.0.0.1:8765
- *   AGENT_MEMORY_PROJECT_ID   optional — auto-detected if unset
+ *   AGENT_MEMORY_PROJECT_ID   optional — auto-detected from CWD if unset
  *   AGENT_MEMORY_WORKSPACE_ID
  *   AGENT_MEMORY_TASK_ID
  *   AGENT_MEMORY_SPOOL_ROOT   default ~/.local/state/agent-memory
+ *
+ * Drop this file into:
+ *   ~/.pi/agent/extensions/agent-memory-pi.ts
+ * or <project>/.pi/agent/extensions/agent-memory-pi.ts
+ *
+ * Pi loads it automatically (no separate install step if in the dir).
  */
 import * as os from "node:os";
 import * as path from "node:path";
@@ -32,14 +37,11 @@ const SPOOL_ROOT =
   process.env.AGENT_MEMORY_SPOOL_ROOT ??
   path.join(os.homedir(), ".local", "state", "agent-memory");
 
-// Auto-detect project_id from CWD (mirrors detect_project_id() in Python)
 function detectProjectId(): string {
   const explicit = process.env.AGENT_MEMORY_PROJECT_ID;
   if (explicit) return explicit;
   try {
-    // Use the basename of the current working directory
-    const cwd = process.cwd();
-    return path.basename(cwd);
+    return path.basename(process.cwd());
   } catch {
     return "unknown";
   }
@@ -65,16 +67,7 @@ type AmEvent = {
 let seq = 0;
 const buffer: AmEvent[] = [];
 
-function nextSeq(): number {
-  return ++seq;
-}
-
-function nowIso(): string {
-  return new Date().toISOString().replace("T", " ").replace(/\.\d+Z$/, "");
-}
-
 function genUuid(): string {
-  // Simple UUID v4 (no external dependency)
   const b = globalThis.crypto.getRandomValues(new Uint8Array(16));
   b[6] = (b[6] & 0x0f) | 0x40;
   b[8] = (b[8] & 0x3f) | 0x80;
@@ -88,6 +81,7 @@ function makeEvent(
   runId: string,
   payload: Record<string, unknown> = {},
 ): AmEvent {
+  seq++;
   return {
     schema_version: "1.0",
     event_id: genUuid(),
@@ -98,26 +92,27 @@ function makeEvent(
     project_id: PROJECT_ID,
     workspace_id: WORKSPACE_ID,
     task_id: TASK_ID,
-    sequence_no: nextSeq(),
-    occurred_at: nowIso(),
+    sequence_no: seq,
+    occurred_at: new Date().toISOString().replace("T", " ").replace(/\.\d+Z$/, ""),
     payload,
   };
 }
 
-function push(type: string, sessionId: string, runId: string, payload?: Record<string, unknown>): void {
+function push(
+  type: string,
+  sessionId: string,
+  runId: string,
+  payload?: Record<string, unknown>,
+): void {
   buffer.push(makeEvent(type, sessionId, runId, payload));
 }
 
 // ── spool (durable fallback) ───────────────────────────────────────────────
 const SPOOL_FILE = path.join(SPOOL_ROOT, "pi", "spool.jsonl");
 
-function ensureSpoolDir(): void {
-  fs.mkdirSync(path.dirname(SPOOL_FILE), { recursive: true });
-}
-
 function writeSpool(events: AmEvent[]): void {
   try {
-    ensureSpoolDir();
+    fs.mkdirSync(path.dirname(SPOOL_FILE), { recursive: true });
     for (const e of events) {
       fs.appendFileSync(SPOOL_FILE, JSON.stringify(e) + "\n");
     }
@@ -157,7 +152,6 @@ async function flushToServer(): Promise<boolean> {
     });
 
     if (!resp.ok) {
-      // Server reachable but rejected — write everything back to spool
       writeSpool(allEvents);
       console.error(`[am-pi] flush failed: HTTP ${resp.status}`);
       return false;
@@ -166,7 +160,6 @@ async function flushToServer(): Promise<boolean> {
     clearSpool();
     return true;
   } catch (err) {
-    // Server unreachable — spool everything
     writeSpool(allEvents);
     console.error("[am-pi] server unreachable, spooling:", (err as Error).message);
     return false;
@@ -199,88 +192,85 @@ function resetGuard(runId: string): void {
   guards.delete(runId);
 }
 
-// ── public API (matches old pi_extension.py surface) ──────────────────────
-export function onSessionStart(sessionId: string, nativeSessionId: string = ""): void {
-  push("session.start", sessionId, sessionId, { native_session_id: nativeSessionId });
-}
-
-export function onRunStarted(runId: string, sessionId: string, headSha: string = ""): void {
-  push("run.started", sessionId, runId, { head_sha_start: headSha });
-}
-
-export function onTurnEnd(runId: string, sessionId: string, turnIndex: number = 0): void {
-  push("turn.end", sessionId, runId, { turn_index: turnIndex });
-}
-
-export function onSessionBeforeCompact(runId: string, sessionId: string, summary: string = ""): void {
-  push("session.compacted", sessionId, runId, { pre_compact_summary: summary });
-}
-
-/**
- * Record that a run has settled. Returns { extract: boolean } so the
- * caller (Pi extension) knows whether to ask the model for extraction.
- */
-export function onRunSettled(
-  runId: string,
-  sessionId: string,
-  outcome: string,
-  headShaEnd: string = "",
-  hadCodeChanges: boolean = false,
-  taskSignificant: boolean = false,
-): { ok: boolean; extract: boolean } {
-  push("run.settled", sessionId, runId, {
-    outcome,
-    head_sha_end: headShaEnd,
+// ── Pi factory (default export) ───────────────────────────────────────────
+export default function agentMemoryExtension(
+  pi: {
+    on: (
+      event: string,
+      handler: (
+        event: Record<string, unknown>,
+        ctx: Record<string, unknown>,
+      ) => void | Promise<void>,
+    ) => () => void;
+  },
+): void {
+  pi.on("session_start", (evt: Record<string, unknown>) => {
+    const sessionId = String(evt.sessionId ?? evt.session_id ?? "");
+    const nativeSessionId = String(evt.nativeSessionId ?? evt.native_session_id ?? "");
+    if (sessionId) {
+      push("session.start", sessionId, sessionId, {
+        native_session_id: nativeSessionId,
+      });
+    }
   });
 
-  let extract = false;
-  if (allowExtraction(runId)) {
-    if (
-      outcome === "completed" && hadCodeChanges ||
-      outcome === "completed" && taskSignificant ||
-      outcome === "failed" ||
-      outcome === "interrupted"
-    ) {
-      push("memory.extraction_requested", sessionId, runId, {});
-      markExtractionAttempted(runId);
-      extract = true;
+  pi.on("agent_start", (evt: Record<string, unknown>) => {
+    const sessionId = String(evt.sessionId ?? evt.session_id ?? "");
+    const runId = String(evt.runId ?? evt.run_id ?? sessionId);
+    const headSha = String(evt.headSha ?? evt.head_sha ?? "");
+    if (sessionId) {
+      push("run.started", sessionId, runId, { head_sha_start: headSha });
     }
-  }
+  });
 
-  return { ok: true, extract };
+  pi.on("turn_end", (evt: Record<string, unknown>) => {
+    const sessionId = String(evt.sessionId ?? evt.session_id ?? "");
+    const runId = String(evt.runId ?? evt.run_id ?? sessionId);
+    const turnIndex = Number(evt.turnIndex ?? evt.turn_index ?? 0);
+    if (sessionId) {
+      push("turn.end", sessionId, runId, { turn_index: turnIndex });
+    }
+  });
+
+  pi.on("agent_settled", (evt: Record<string, unknown>) => {
+    const sessionId = String(evt.sessionId ?? evt.session_id ?? "");
+    const runId = String(evt.runId ?? evt.run_id ?? sessionId);
+    const outcome = String(evt.outcome ?? "completed");
+    const headShaEnd = String(evt.headShaEnd ?? evt.head_sha_end ?? "");
+    const hadCodeChanges = Boolean(evt.hadCodeChanges ?? evt.had_code_changes ?? false);
+    const taskSignificant = Boolean(evt.taskSignificant ?? evt.task_significant ?? false);
+
+    if (sessionId) {
+      push("run.settled", sessionId, runId, {
+        outcome,
+        head_sha_end: headShaEnd,
+      });
+
+      // Decide if extraction should be requested
+      if (allowExtraction(runId)) {
+        if (
+          (outcome === "completed" && hadCodeChanges) ||
+          (outcome === "completed" && taskSignificant) ||
+          outcome === "failed" ||
+          outcome === "interrupted"
+        ) {
+          push("memory.extraction_requested", sessionId, runId, {});
+          markExtractionAttempted(runId);
+        }
+      }
+    }
+  });
+
+  pi.on("session_shutdown", (evt: Record<string, unknown>) => {
+    const sessionId = String(evt.sessionId ?? evt.session_id ?? "");
+    if (sessionId) {
+      push("session.end", sessionId, sessionId, {});
+    }
+    // Fire-and-forget flush; never block Pi shutdown.
+    void flushToServer();
+  });
 }
 
-export function submitExtractionResult(
-  runId: string,
-  sessionId: string,
-  captureResult: string,
-  handoff?: Record<string, unknown>,
-  memories?: Record<string, unknown>[],
-): void {
-  const payload: Record<string, unknown> = { capture_result: captureResult };
-  if (handoff) payload["handoff"] = handoff;
-  if (memories && memories.length > 0) payload["memories"] = memories;
-  if (captureResult === "no_durable_memory") payload["result"] = "no_durable_memory";
-  push("memory.extraction_completed", sessionId, runId, payload);
-  resetGuard(runId);
-}
-
-export function onRunInterrupted(runId: string, sessionId: string, reason: string = ""): void {
-  push("run.interrupted", sessionId, runId, { reason });
-}
-
-/**
- * Flush all buffered events to the server, then clear the buffer.
- * Call this on session shutdown.
- */
-export async function onSessionShutdown(sessionId: string): Promise<boolean> {
-  push("session.end", sessionId, sessionId, {});
-  return flushToServer();
-}
-
-/**
- * Flush without emitting a session.end event (e.g. periodic checkpoint).
- */
-export async function flush(): Promise<boolean> {
-  return flushToServer();
-}
+// ── named exports for programmatic use (optional) ────────────────────────
+export { flushToServer, push, allowExtraction, markExtractionAttempted, resetGuard };
+export type { AmEvent };
