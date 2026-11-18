@@ -9,7 +9,9 @@
 #   2. Prints the env vars you must set before launching Pi.
 #
 # The TS extension talks directly to the agent-memory server's HTTP API
-# (POST /v1/events/batch). No Python subprocess is spawned.
+# (POST /v1/events/batch). No Python or node subprocess is required —
+# the extension is a self-contained TypeScript module that only calls
+# the server's HTTP API.
 
 set -euo pipefail
 
@@ -53,6 +55,9 @@ echo "    returns { extract: true } when extraction is warranted; then"
 echo "    ask the model for a structured result and call"
 echo "    submitExtractionResult. Call onSessionShutdown to flush."
 echo
-echo " 4. Verify events are landing:"
-echo "    python3 -m memoryctl index status --json   # on the service side"
+echo " 4. Verify events are landing (no Python needed):"
+echo "    - Browser dashboard: open the agent-memory web UI and check"
+echo "      the Events / Index Status panels."
+echo "    - Or with curl:"
+echo "      curl http://127.0.0.1:8765/v1/projects/<your-project>/events"
 echo

@@ -50,6 +50,10 @@ echo "    export AGENT_MEMORY_PROJECT_ID=<your-project>"
 echo "    # optional: export AGENT_MEMORY_WORKSPACE_ID / AGENT_MEMORY_TASK_ID"
 echo
 echo " 2. In the Codex CLI, run /hooks and trust the four new hooks."
-echo " 3. Verify events are landing:"
-echo "    python3 -m memoryctl index status --json"
+echo " 3. Verify events are landing (hooks still use Python; for a"
+echo "    no-Python check use the browser dashboard or curl):"
+echo "    - Browser dashboard: open the agent-memory web UI and check"
+echo "      the Events / Index Status panels."
+echo "    - Or with curl:"
+echo "      curl http://127.0.0.1:8765/v1/projects/<your-project>/events"
 echo
