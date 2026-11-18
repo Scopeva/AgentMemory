@@ -25,8 +25,10 @@ async def insert_event(db: Database, event: EventEnvelope) -> bool:
                 "SELECT 1 FROM projects WHERE project_id = ?", (event.project_id,)
             )
             if not await cursor.fetchone():
+                # All five columns: projects.name and projects.status are
+                # NOT NULL, so a bare 3-column insert silently no-ops.
                 await conn.execute(
-                    "INSERT OR IGNORE INTO projects "
+                    "INSERT INTO projects "
                     "(project_id, name, status, created_at, updated_at) "
                     "VALUES (?, ?, 'active', ?, ?)",
                     (event.project_id, event.project_id, now, now),
