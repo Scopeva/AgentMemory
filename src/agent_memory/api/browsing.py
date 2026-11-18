@@ -45,6 +45,31 @@ async def get_project(request: Request, project_id: str) -> dict:
     return _project_to_dict(p)
 
 
+@router.post("/projects/register", status_code=201)
+async def register_project(request: Request, payload: dict) -> dict:
+    """Register a project so agent events / knowledge can reference it.
+
+    Body: {"project_id": "demo", "name": "Demo project"}  (name optional).
+    Idempotent: re-registering the same project_id updates nothing
+    (already-exists → 409 with the existing record).
+    """
+    from agent_memory.schemas import Project
+    from agent_memory.storage.repositories import projects as repo
+
+    project_id = payload.get("project_id")
+    if not project_id:
+        raise HTTPException(400, "project_id required")
+
+    db = request.app.state.db
+    existing = await repo.get_project(db, project_id)
+    if existing is not None:
+        return {"project_id": project_id, "action": "exists", **_project_to_dict(existing)}
+
+    p = Project(project_id=project_id, name=payload.get("name") or project_id)
+    p = await repo.register_project(db, p)
+    return {"project_id": project_id, "action": "registered", **_project_to_dict(p)}
+
+
 def _project_to_dict(p) -> dict:
     return {
         "project_id": p.project_id,
