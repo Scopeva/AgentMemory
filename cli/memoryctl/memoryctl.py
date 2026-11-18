@@ -520,6 +520,12 @@ def cmd_index_drain(args) -> int:
     cfg = _load_cfg()
     conn = _connect(cfg)
     conn.execute("PRAGMA journal_mode = WAL")
+    # shortcut: assumes one index-draining process; use leased jobs for multi-process workers.
+    conn.execute(
+        "UPDATE index_jobs SET status='pending', error=NULL, updated_at=? WHERE status='running'",
+        (_utcnow(),),
+    )
+    conn.commit()
 
     rows = conn.execute(
         "SELECT job_id, memory_id, project_id, job_type FROM index_jobs "
@@ -606,9 +612,8 @@ def cmd_index_rebuild(args) -> int:
     With --project-id: only wipes index entries belonging to that project and
     requeues only its active knowledge rows.
 
-    FTS5 (chunks_fts) cannot be filtered by project_id directly, so scoped
-    deletes are done via memory_id (the chunk's entity_id). Full rebuilds
-    delete the entire FTS + vector tables.
+    Full rebuilds clear every derived chunk, FTS, and vector entry before
+    requeuing active knowledge. Scoped rebuilds clear those entries per project.
     """
     cfg = _load_cfg()
     conn = _connect(cfg)
@@ -633,6 +638,7 @@ def cmd_index_rebuild(args) -> int:
                     f"DELETE FROM {fts_table} WHERE chunk_id LIKE ?",
                     (f"{mid}:%",),
                 )
+        conn.execute("DELETE FROM chunks WHERE project_id = ?", (args.project_id,))
         if vec_table:
             for mid in mem_ids:
                 conn.execute(
@@ -650,6 +656,7 @@ def cmd_index_rebuild(args) -> int:
         # Full rebuild: wipe all index data.
         if fts_table:
             conn.execute(f"DELETE FROM {fts_table}")
+        conn.execute("DELETE FROM chunks")
         if vec_table:
             conn.execute("DELETE FROM memory_vectors")
         conn.execute("DELETE FROM index_jobs")

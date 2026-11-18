@@ -11,6 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
+from agent_memory.api.admin import require_admin
 from agent_memory.schemas import Checkpoint, EventEnvelope
 from agent_memory.services import core
 from agent_memory.storage.database import Database
@@ -143,6 +144,7 @@ async def list_pending(
     project_id: Optional[str] = None,
     limit: int = 50,
     db: Database = Depends(get_db),
+    _: None = Depends(require_admin),
 ) -> dict:
     """List pending memory candidates."""
     results = await core.list_pending_candidates(db, project_id=project_id, limit=limit)
@@ -155,6 +157,7 @@ async def approve_candidate(
     decided_by: str = "admin",
     auto_accept: bool = False,
     db: Database = Depends(get_db),
+    _: None = Depends(require_admin),
 ) -> dict:
     """Approve a memory candidate; optionally auto-promote to accepted knowledge."""
     memory_id = await core.approve_candidate(
@@ -169,6 +172,7 @@ async def reject_candidate(
     decided_by: str = "admin",
     reason: Optional[str] = None,
     db: Database = Depends(get_db),
+    _: None = Depends(require_admin),
 ) -> dict:
     """Reject a memory candidate."""
     rejected = await core.reject_candidate(
@@ -181,6 +185,7 @@ async def reject_candidate(
 async def retry_job(
     job_id: str,
     db: Database = Depends(get_db),
+    _: None = Depends(require_admin),
 ) -> dict:
     """Reset a failed index job back to pending so the background loop can pick it up."""
     from datetime import datetime, timezone

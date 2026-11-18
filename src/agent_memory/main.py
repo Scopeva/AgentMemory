@@ -99,6 +99,10 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         # Phase 4: indexing worker + job dispatcher
         worker = IndexingWorker(sync_conn, config.retrieval, embedder)
         dispatcher = JobDispatcher(db, worker, config.retrieval, sync_conn)
+        # shortcut: assumes one service process; use leased jobs before adding workers.
+        recovered = dispatcher.recover_interrupted_jobs()
+        if recovered:
+            logger.warning("requeued %d interrupted indexing job(s)", recovered)
         app.state.indexing_worker = worker
         app.state.job_dispatcher = dispatcher
 
@@ -144,7 +148,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
 

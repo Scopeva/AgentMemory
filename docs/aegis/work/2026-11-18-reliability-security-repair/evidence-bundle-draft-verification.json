@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "full-regression",
+  "type": "test",
+  "source": "./.venv/bin/pytest -q",
+  "summary": "164 tests passed after all security, indexing, deletion, restart, and compose fixes.",
+  "verifier": "pytest",
+  "sliceId": "verification",
+  "evidenceStatus": "evidence-finalized",
+  "updatedAt": "2026-11-18"
+}

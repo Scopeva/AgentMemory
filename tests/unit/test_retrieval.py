@@ -99,6 +99,10 @@ class TestFts5Query:
         q = fts5_query("ignored", fts_query='"foo" OR "bar"')
         assert q == '"foo" OR "bar"'
 
+    def test_empty_and_quoted_tokens_are_safe(self):
+        assert fts5_query("   ") == ""
+        assert fts5_query('alpha"') == '"alpha"""'
+
 
 # ---------------------------------------------------------------------------
 # Embedding provider (mocked HTTP)
@@ -350,6 +354,10 @@ class TestIndexingWorker:
             "SELECT chunk_id FROM chunks_fts WHERE chunk_id LIKE 'k1:%'"
         ).fetchall()
         assert len(row) == result["chunks_indexed"]
+        chunks = index_conn.execute(
+            "SELECT chunk_id FROM chunks WHERE memory_id = 'k1'"
+        ).fetchall()
+        assert len(chunks) == result["chunks_indexed"]
 
     @pytest.mark.asyncio
     async def test_index_batch_truncates(self, index_conn):
@@ -365,12 +373,30 @@ class TestIndexingWorker:
     @pytest.mark.asyncio
     async def test_delete_knowledge_index(self, index_conn):
         worker = IndexingWorker(index_conn, RetrievalConfig(), embedding_provider=None)
-        await worker.index_knowledge("k1", {"project_id": "p1", "title": "T", "content": "C" * 300})
+        await worker.index_knowledge(
+            "k1", {"project_id": "p1", "title": "T", "content": "word " * 500}
+        )
         worker.delete_knowledge_index("k1")
-        rows = index_conn.execute(
-            "SELECT chunk_id FROM chunks_fts WHERE chunk_id LIKE 'k1:%'"
-        ).fetchall()
-        assert len(rows) == 0
+        assert index_conn.execute("SELECT count(*) FROM chunks_fts").fetchone()[0] == 0
+        assert index_conn.execute("SELECT count(*) FROM chunks").fetchone()[0] == 0
+
+    @pytest.mark.asyncio
+    async def test_reindex_replaces_all_old_chunks(self, index_conn):
+        worker = IndexingWorker(
+            index_conn,
+            RetrievalConfig(chunk_max_chars=10, chunk_min_chars=1),
+            embedding_provider=None,
+        )
+        await worker.index_knowledge(
+            "k1", {"project_id": "p1", "title": "T", "content": "alpha " + "x " * 30}
+        )
+        assert index_conn.execute("SELECT count(*) FROM chunks_fts").fetchone()[0] > 1
+
+        result = await worker.index_knowledge(
+            "k1", {"project_id": "p1", "title": "T", "content": "short"}
+        )
+        assert index_conn.execute("SELECT count(*) FROM chunks_fts").fetchone()[0] == result["chunks_indexed"]
+        assert index_conn.execute("SELECT count(*) FROM chunks").fetchone()[0] == result["chunks_indexed"]
 
     @pytest.mark.asyncio
     async def test_index_with_mocked_embedder(self, index_conn):

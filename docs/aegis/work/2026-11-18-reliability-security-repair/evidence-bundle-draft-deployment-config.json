@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "compose-validation",
+  "type": "validation",
+  "source": "docker compose -f compose.yaml config; docker compose -f docker-compose.yml config",
+  "summary": "Both Compose variants parse with localhost-only port binding and an explicit admin-token requirement.",
+  "verifier": "docker-compose",
+  "sliceId": "deployment-config",
+  "evidenceStatus": "evidence-finalized",
+  "updatedAt": "2026-11-18"
+}

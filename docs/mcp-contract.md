@@ -14,7 +14,8 @@
 
 ## Authorization
 
-- Each agent must be registered in `security.mcp_allowed_agents`.
+- MCP caller identity and admission are enforced by the transport host; these
+  tools receive no caller identity and therefore do not claim per-agent ACLs.
 - Tools returning knowledge are scoped to the resolved project.
 - `submit_memory_candidate` only creates candidates; it cannot accept or reject.
 - `update_task_state` requires the caller to hold the task lease or be the owner.

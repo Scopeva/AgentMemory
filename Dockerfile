@@ -3,6 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 COPY pyproject.toml ./
+COPY config.example.toml ./
 COPY src ./src
 COPY cli ./cli
 COPY web ./web

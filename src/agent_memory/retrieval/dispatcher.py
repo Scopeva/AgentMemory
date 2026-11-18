@@ -81,6 +81,16 @@ class JobDispatcher:
         self._conn.commit()
         return job_id
 
+    def recover_interrupted_jobs(self) -> int:
+        """Return jobs left running by a previous service process to the queue."""
+        cursor = self._conn.execute(
+            "UPDATE index_jobs SET status = 'pending', error = NULL, updated_at = ? "
+            "WHERE status = 'running'",
+            (_utcnow(),),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
     # ------------------------------------------------------------------
     # Drain
     # ------------------------------------------------------------------

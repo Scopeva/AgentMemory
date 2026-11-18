@@ -18,9 +18,9 @@ def fts5_query(query: str, fts_query: str | None = None) -> str:
     # Split on whitespace and quote each token to avoid FTS5 operator injection
     tokens = query.split()
     if not tokens:
-        return '""'
+        return ""
     # Quote each token: "word" OR "word" style
-    return " ".join(f'"{t}"' for t in tokens if t.strip())
+    return " ".join(f'"{t.replace(chr(34), chr(34) * 2)}"' for t in tokens if t.strip())
 
 
 class LexicalIndex:

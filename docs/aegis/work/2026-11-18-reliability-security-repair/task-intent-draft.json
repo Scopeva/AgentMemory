@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "requestedOutcome": "Repair all seven confirmed audit findings without mutating existing live data.",
+  "goal": "Repair all seven confirmed audit findings without mutating existing live data.",
+  "successEvidence": [
+    "Focused regression tests, Compose validation, and the available full test suite pass."
+  ],
+  "stopCondition": "Done when all planned repairs are implemented and verified; needs-verification if the local environment blocks required tests.",
+  "nonGoals": [
+    "No live database deletion, schema redesign, or MCP transport redesign."
+  ],
+  "scope": "HTTP admin admission, retrieval derived index lifecycle, job recovery, project deletion order, Docker configuration, documentation, and focused tests.",
+  "changeKinds": [
+    "repair"
+  ],
+  "riskHints": [
+    "Security, data deletion, persistence, and public HTTP behavior"
+  ]
+}

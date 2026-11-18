@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "baselineRefs": [
+    "docs/aegis/BASELINE-GOVERNANCE.md"
+  ],
+  "impactStatement": "docs/aegis/work/2026-11-18-reliability-security-repair/impact-statement-draft.json",
+  "compatPlan": "Admin endpoints require a configured token; valid-token route payloads remain stable.",
+  "retirementPlan": "Duplicated permissive admin checks and false ACL documentation retired.",
+  "evidenceBundle": [
+    "docs/aegis/work/2026-11-18-reliability-security-repair/evidence-bundle-draft-deployment-config.json",
+    "docs/aegis/work/2026-11-18-reliability-security-repair/evidence-bundle-draft-verification.json"
+  ]
+}

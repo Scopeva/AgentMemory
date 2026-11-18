@@ -125,23 +125,31 @@ class TestDispatcherDrain:
         j2 = dispatcher.enqueue_index("k1", "p1")
         assert j1 == j2  # same pending job returned
 
+    async def test_recover_interrupted_jobs(self, e2e_db, sync_conn):
+        worker = IndexingWorker(sync_conn, RetrievalConfig())
+        dispatcher = JobDispatcher(e2e_db, worker, RetrievalConfig(), sync_conn)
+        sync_conn.execute(
+            "INSERT INTO index_jobs (job_id, memory_id, project_id, job_type, status, attempts, "
+            "created_at, updated_at) VALUES ('stalled', 'k1', 'p1', 'index', 'running', 1, ?, ?)",
+            ("2026-01-01", "2026-01-01"),
+        )
+        sync_conn.commit()
+
+        assert dispatcher.recover_interrupted_jobs() == 1
+        assert sync_conn.execute(
+            "SELECT status FROM index_jobs WHERE job_id = 'stalled'"
+        ).fetchone()[0] == "pending"
+
 
 @pytest.mark.asyncio
 class TestHybridSearchEndToEnd:
     async def test_search_finds_indexed_knowledge(self, e2e_db, sync_conn):
-        # Seed knowledge + run indexer manually
+        # The indexer owns both the FTS and materialized chunk tables.
         worker = IndexingWorker(sync_conn, RetrievalConfig())
         await worker.index_knowledge(
             "k1",
             {"project_id": "p1", "title": "WAL Mode", "content": "PRAGMA journal_mode=WAL improves concurrency", "summary": ""},
         )
-        sync_conn.execute(
-            "INSERT INTO chunks (chunk_id, project_id, memory_id, chunk_index, "
-            "token_estimate, title, text, active, indexed_at) VALUES "
-            "('k1:0', 'p1', 'k1', 0, 10, 'WAL Mode', "
-            "'WAL Mode PRAGMA journal_mode=WAL improves concurrency', 1, '2026-01-01')"
-        )
-        sync_conn.commit()
 
         search = SearchService(
             db=e2e_db,

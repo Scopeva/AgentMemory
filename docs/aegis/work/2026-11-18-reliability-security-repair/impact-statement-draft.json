@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "affectedLayers": [
+    "api,retrieval,storage,distribution"
+  ],
+  "owners": [
+    "existing routers, IndexingWorker, JobDispatcher, project deletion transaction"
+  ],
+  "invariants": [
+    "No unauthenticated admin mutation; derived chunks stay synchronized; project deletion respects every FK."
+  ],
+  "compatBoundary": "Admin endpoints require a configured token; valid-token route payloads remain stable.",
+  "nonGoals": [
+    "No live database deletion, schema redesign, or MCP transport redesign."
+  ]
+}

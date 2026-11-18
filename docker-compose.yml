@@ -4,13 +4,13 @@ services:
     # or: image: scopeva/agent-memory:latest
     container_name: agent-memory
     ports:
-      # host:container — host agents reach the service on 127.0.0.1:8765
-      - "8765:8765"
+      # Host agents reach the service on localhost only.
+      - "127.0.0.1:8765:8765"
     environment:
       # Config / data paths (override in your .env or shell profile)
       AGENT_MEMORY_CONFIG_PATH: /app/config.example.toml
       AGENT_MEMORY_DATABASE_PATH: /data/memory.db
-      AGENT_MEMORY_ADMIN_TOKEN: "change-me"
+      AGENT_MEMORY_ADMIN_TOKEN: ${AGENT_MEMORY_ADMIN_TOKEN:?set an admin token}
       # BGE-M3 lives on the host; from inside the container use
       # host.docker.internal (Linux: add extra_hosts as shown below).
       AGENT_MEMORY_EMBEDDING_ENDPOINT: "http://host.docker.internal:8001"

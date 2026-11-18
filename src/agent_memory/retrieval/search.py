@@ -62,6 +62,14 @@ class SearchService:
         Falls back to lexical-only if vector index unavailable.
         Falls back to a simple LIKE search if no FTS5 index is built yet.
         """
+        query = query.strip()
+        if not query:
+            return {
+                "results": [],
+                "retrieval_mode": "none",
+                "lexical_hits": 0,
+                "vector_hits": 0,
+            }
         if not self.has_index:
             # No index built; fall back to SQL LIKE
             return await self._fallback_search(project_id, query, limit, status)

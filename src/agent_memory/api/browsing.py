@@ -6,9 +6,12 @@ Read endpoints are open; DELETE /projects/{id} is admin-gated.
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from agent_memory.api.admin import require_admin
 
 router = APIRouter(prefix="/v1")
 
@@ -96,35 +99,19 @@ def _project_to_dict(p) -> dict:
 # Project deletion (admin)
 # ---------------------------------------------------------------------------
 
-
-def _check_admin(request: Request, token: Optional[str]) -> None:
-    """Verify admin token against the configured env var (mirrors retrieval._check_admin)."""
-    import os
-
-    config = getattr(request.app.state, "config", None)
-    env_name = config.security.admin_token_env if config else "AGENT_MEMORY_ADMIN_TOKEN"
-    expected = os.environ.get(env_name)
-    if expected and token != expected:
-        raise HTTPException(403, "invalid admin token")
-
-
 @router.delete("/projects/{project_id}")
 async def delete_project(
     request: Request,
     project_id: str,
-    x_admin_token: Optional[str] = Header(default=None),
+    _: None = Depends(require_admin),
 ) -> dict:
     """Cascade-delete a project and all of its data.
 
-    Requires admin token (X-Admin-Token header). Deletes, in FK order:
-      events, checkpoints, runs, handoffs, tasks,
-      knowledge_revisions, knowledge, index_jobs, FTS/vector index
-      entries, sessions referenced only by this project's runs,
-      finally the project row itself.
+    Requires admin token (X-Admin-Token header). Deletes every project-owned
+    row in foreign-key order, then the repository/workspace and project rows.
     """
     from agent_memory.storage.repositories import projects as repo
 
-    _check_admin(request, x_admin_token)
     db = request.app.state.db
     existing = await repo.get_project(db, project_id)
     if existing is None:
@@ -132,28 +119,6 @@ async def delete_project(
 
     async with db.connection() as conn:
         deleted: dict[str, int] = {}
-
-        # 1. events + checkpoints (via this project's runs)
-        for table in ("events", "checkpoints"):
-            cursor = await conn.execute(
-                f"DELETE FROM {table} WHERE run_id IN "
-                f"(SELECT run_id FROM runs WHERE project_id = ?)",
-                (project_id,),
-            )
-            deleted[table] = cursor.rowcount or 0
-
-        # 2. runs
-        cursor = await conn.execute("DELETE FROM runs WHERE project_id = ?", (project_id,))
-        deleted["runs"] = cursor.rowcount or 0
-
-        # 3. handoffs + tasks
-        for table in ("handoffs", "tasks"):
-            cursor = await conn.execute("DELETE FROM " + table + " WHERE project_id = ?", (project_id,))
-            deleted[table] = cursor.rowcount or 0
-
-        # 4. knowledge + revisions
-        cursor = await conn.execute("DELETE FROM knowledge_revisions WHERE project_id = ?", (project_id,))
-        deleted["knowledge_revisions"] = cursor.rowcount or 0
 
         mem_ids = [
             r[0]
@@ -163,37 +128,94 @@ async def delete_project(
                 )
             ).fetchall()
         ]
-        cursor = await conn.execute("DELETE FROM knowledge WHERE project_id = ?", (project_id,))
-        deleted["knowledge"] = cursor.rowcount or 0
+        repo_ids = [
+            r[0]
+            for r in await (
+                await conn.execute(
+                    "SELECT repository_id FROM repositories WHERE project_id = ?", (project_id,)
+                )
+            ).fetchall()
+        ]
 
-        # 5. index jobs + FTS/vector index entries
+        # Candidates may reference runs, and approvals reference candidates.
+        cursor = await conn.execute(
+            "DELETE FROM approvals WHERE candidate_id IN "
+            "(SELECT candidate_id FROM memory_candidates WHERE project_id = ?)",
+            (project_id,),
+        )
+        deleted["approvals"] = cursor.rowcount or 0
+        cursor = await conn.execute("DELETE FROM memory_candidates WHERE project_id = ?", (project_id,))
+        deleted["memory_candidates"] = cursor.rowcount or 0
+
+        # Events and checkpoints reference runs.
+        for table in ("events", "checkpoints"):
+            cursor = await conn.execute(
+                f"DELETE FROM {table} WHERE run_id IN "
+                f"(SELECT run_id FROM runs WHERE project_id = ?)",
+                (project_id,),
+            )
+            deleted[table] = cursor.rowcount or 0
+
+        # Runs must be removed before their project tasks.
+        cursor = await conn.execute("DELETE FROM runs WHERE project_id = ?", (project_id,))
+        deleted["runs"] = cursor.rowcount or 0
+
+        # Handoffs reference tasks.
+        cursor = await conn.execute(
+            "DELETE FROM handoffs WHERE task_id IN "
+            "(SELECT task_id FROM tasks WHERE project_id = ?)",
+            (project_id,),
+        )
+        deleted["handoffs"] = cursor.rowcount or 0
+        cursor = await conn.execute("DELETE FROM tasks WHERE project_id = ?", (project_id,))
+        deleted["tasks"] = cursor.rowcount or 0
+
+        # Derived and evidence rows reference knowledge.
+        cursor = await conn.execute(
+            "DELETE FROM knowledge_sources WHERE memory_id IN "
+            "(SELECT memory_id FROM knowledge WHERE project_id = ?)",
+            (project_id,),
+        )
+        deleted["knowledge_sources"] = cursor.rowcount or 0
+        cursor = await conn.execute(
+            "DELETE FROM knowledge_revisions WHERE memory_id IN "
+            "(SELECT memory_id FROM knowledge WHERE project_id = ?)",
+            (project_id,),
+        )
+        deleted["knowledge_revisions"] = cursor.rowcount or 0
         cursor = await conn.execute("DELETE FROM index_jobs WHERE project_id = ?", (project_id,))
         deleted["index_jobs"] = cursor.rowcount or 0
-
-        # chunks_fts carries its own project_id column — scoped delete.
         cursor = await conn.execute("DELETE FROM chunks_fts WHERE project_id = ?", (project_id,))
         deleted["fts_chunks"] = cursor.rowcount or 0
+        cursor = await conn.execute("DELETE FROM chunks WHERE project_id = ?", (project_id,))
+        deleted["chunks"] = cursor.rowcount or 0
 
-        # memory_vectors is a vec0 virtual table — only present when the
-        # sqlite-vec extension is loaded at runtime.
         try:
-            cursor = await conn.execute(
-                "SELECT 1 FROM memory_vectors LIMIT 1"
-            )
+            cursor = await conn.execute("SELECT 1 FROM memory_vectors LIMIT 1")
             await cursor.fetchone()
             for mid in mem_ids:
                 cursor = await conn.execute(
                     "DELETE FROM memory_vectors WHERE memory_id = ?", (mid,)
                 )
             deleted["memory_vectors"] = len(mem_ids)
-        except Exception:
+        except sqlite3.OperationalError:
             pass  # vec not loaded — nothing to clean
 
-        # 6. sessions referenced ONLY by this project's runs are already
-        #    deleted above; sessions are not project-scoped — keep them.
-        #    (Runs are the project-scoped boundary; a session may span projects.)
+        cursor = await conn.execute("DELETE FROM knowledge WHERE project_id = ?", (project_id,))
+        deleted["knowledge"] = cursor.rowcount or 0
 
-        # 7. the project row itself
+        # Workspaces reference repositories, both of which reference the project.
+        if repo_ids:
+            placeholders = ",".join("?" * len(repo_ids))
+            cursor = await conn.execute(
+                f"DELETE FROM workspaces WHERE repository_id IN ({placeholders})", repo_ids
+            )
+            deleted["workspaces"] = cursor.rowcount or 0
+        else:
+            deleted["workspaces"] = 0
+        cursor = await conn.execute("DELETE FROM repositories WHERE project_id = ?", (project_id,))
+        deleted["repositories"] = cursor.rowcount or 0
+
         cursor = await conn.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
         deleted["projects"] = cursor.rowcount or 0
 
@@ -382,6 +404,8 @@ async def retrieval_search_alias(
     status: Optional[str] = None,
 ) -> dict:
     """Alias for /v1/search so the dashboard's /v1/retrieval/search works."""
+    if not query.strip():
+        raise HTTPException(422, "query must not be blank")
     db = request.app.state.db
     from agent_memory.services import core
 

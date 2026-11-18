@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-11-18-reliability-security-repair",
+  "lastCheckpointRef": "docs/aegis/work/2026-11-18-reliability-security-repair/todo-checkpoint-draft.json",
+  "resumeInstruction": "Read the repair plan, work evidence, and git diff before making follow-up changes.",
+  "knownPartialWork": [
+    "Implemented and verified every item in the reliability/security repair plan."
+  ],
+  "mustReadBeforeContinuing": [
+    "docs/aegis/work/2026-11-18-reliability-security-repair/10-intent.md",
+    "docs/aegis/work/2026-11-18-reliability-security-repair/20-checkpoint.md",
+    "docs/aegis/work/2026-11-18-reliability-security-repair/todo-checkpoint-draft.json"
+  ],
+  "unsafeToAssume": [
+    "Multiple service processes require leased job ownership rather than startup recovery."
+  ]
+}

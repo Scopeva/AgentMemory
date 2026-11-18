@@ -40,7 +40,7 @@ variables override TOML values; see `.env.example`.
 | `[retrieval]` | `lexical_top_k`, `vector_top_k`, `final_top_k`, `rrf_k`, `chunk_max_chars`, `chunk_min_chars`, `batch_index_max_docs` | hybrid FTS5 + vector RRF fusion |
 | `[memory]` | `auto_capture`, `approval_required_for_adr`, `max_context_tokens` | candidate/promotion policy |
 | `[events]` | `durable_spool`, `retry_enabled`, `max_extraction_attempts` | at-least-once spool + dedup |
-| `[security]` | `mcp_allowed_agents`, `admin_token_env` | agent ACL + admin token |
+| `[security]` | `admin_token_env` | token for privileged HTTP routes |
 | `[workers]` | `interval_seconds`, `empty_backoff_seconds` | background indexing loop cadence |
 
 Environment overrides: `AGENT_MEMORY_WORKERS_INTERVAL_SECONDS`,
@@ -135,7 +135,7 @@ docker compose up -d
 # → maps host 127.0.0.1:8765 to the container's service port
 ```
 See `docker-compose.yml` in the repo. The compose file wires:
-- port mapping `8765:8765` (host → container)
+- loopback-only port mapping `127.0.0.1:8765:8765` (host → container)
 - a persistent volume `memory-data:/data` (SQLite survives restarts)
 - `extra_hosts: host.docker.internal:host-gateway` (Linux only, so the
   container can reach a host-side BGE-M3 service)

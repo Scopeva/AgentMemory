@@ -77,7 +77,6 @@ class EventsConfig:
 
 @dataclass
 class SecurityConfig:
-    mcp_allowed_agents: list[str] = field(default_factory=lambda: ["pi", "codex", "opencode"])
     admin_token_env: str = "AGENT_MEMORY_ADMIN_TOKEN"
 
 
@@ -134,6 +133,10 @@ def load_config(path: str | None = None) -> AppConfig:
         with open(config_path, "rb") as f:
             data = tomllib.load(f)
 
+    security_data = dict(data.get("security", {}))
+    # The legacy list was never enforced; accept it so upgrades do not fail.
+    security_data.pop("mcp_allowed_agents", None)
+
     config = AppConfig(
         server=ServerConfig(**data.get("server", {})),
         database=DatabaseConfig(**data.get("database", {})),
@@ -141,7 +144,7 @@ def load_config(path: str | None = None) -> AppConfig:
         retrieval=RetrievalConfig(**data.get("retrieval", {})),
         memory=MemoryConfig(**data.get("memory", {})),
         events=EventsConfig(**data.get("events", {})),
-        security=SecurityConfig(**data.get("security", {})),
+        security=SecurityConfig(**security_data),
         workers=WorkersConfig(**data.get("workers", {})),
     )
     config = _apply_env_overrides(config, os.environ)

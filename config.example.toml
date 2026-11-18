@@ -49,9 +49,8 @@ retry_enabled = true
 max_extraction_attempts = 1
 
 [security]
-# Credentials and admin tokens should come from environment variables or the
-# macOS Keychain, not from this TOML file.
-mcp_allowed_agents = ["pi", "codex", "opencode"]
+# The HTTP service does not receive MCP caller identity; configure MCP transport
+# admission at its host. Admin tokens belong in environment variables or Keychain.
 admin_token_env = "AGENT_MEMORY_ADMIN_TOKEN"
 
 [workers]

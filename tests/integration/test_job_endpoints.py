@@ -9,15 +9,16 @@ import pytest
 
 
 @pytest.fixture
-def app_env(tmp_path: Path):
+def app_env(tmp_path: Path, monkeypatch):
     """Set env vars for a fresh DB and build the FastAPI app with TestClient."""
     from agent_memory.config import DatabaseConfig, load_config
     from agent_memory.main import create_app
 
     db_path = tmp_path / "memory.db"
-    os.environ["AGENT_MEMORY_DATABASE_PATH"] = str(db_path)
-    os.environ["AGENT_MEMORY_CONFIG_PATH"] = ""
-    os.environ["AGENT_MEMORY_EMBEDDING_ENABLED"] = "false"
+    monkeypatch.setenv("AGENT_MEMORY_DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("AGENT_MEMORY_CONFIG_PATH", "")
+    monkeypatch.setenv("AGENT_MEMORY_EMBEDDING_ENABLED", "false")
+    monkeypatch.delenv("AGENT_MEMORY_ADMIN_TOKEN", raising=False)
     yield str(db_path)
 
 
@@ -92,7 +93,7 @@ class TestJobEndpoints:
         assert data["job_id"] == job_id
         assert data["status"] == "pending"
 
-    def test_retry_failed_job(self, app_env: str):
+    def test_retry_failed_job(self, app_env: str, monkeypatch):
         import uuid
         import asyncio
         import aiosqlite
@@ -100,6 +101,7 @@ class TestJobEndpoints:
         app = _make_app(app_env)
         client = _client(app)
         job_id = str(uuid.uuid4())
+        monkeypatch.setenv("AGENT_MEMORY_ADMIN_TOKEN", "test-token")
 
         async def _seed_failed():
             conn = await aiosqlite.connect(app_env)
@@ -114,7 +116,9 @@ class TestJobEndpoints:
         asyncio.run(_seed_failed())
 
         with client:
-            resp = client.post(f"/v1/admin/jobs/{job_id}/retry")
+            resp = client.post(
+                f"/v1/admin/jobs/{job_id}/retry", headers={"X-Admin-Token": "test-token"}
+            )
         assert resp.status_code == 200
         assert resp.json()["action"] == "reset_to_pending"
 
@@ -127,7 +131,7 @@ class TestJobEndpoints:
 
         assert asyncio.run(_check()) == "pending"
 
-    def test_retry_non_failed_job_409(self, app_env: str):
+    def test_retry_non_failed_job_409(self, app_env: str, monkeypatch):
         import uuid
         import asyncio
         import aiosqlite
@@ -135,6 +139,7 @@ class TestJobEndpoints:
         app = _make_app(app_env)
         client = _client(app)
         job_id = str(uuid.uuid4())
+        monkeypatch.setenv("AGENT_MEMORY_ADMIN_TOKEN", "test-token")
 
         async def _seed_pending():
             conn = await aiosqlite.connect(app_env)
@@ -149,5 +154,7 @@ class TestJobEndpoints:
         asyncio.run(_seed_pending())
 
         with client:
-            resp = client.post(f"/v1/admin/jobs/{job_id}/retry")
+            resp = client.post(
+                f"/v1/admin/jobs/{job_id}/retry", headers={"X-Admin-Token": "test-token"}
+            )
         assert resp.status_code == 409

@@ -3,7 +3,7 @@ services:
     build: .
     container_name: agent-memory
     ports:
-      - "8765:8765"
+      - "127.0.0.1:8765:8765"
     volumes:
       - agent-memory-data:/data
       - ./config.example.toml:/app/config.example.toml:ro
@@ -13,7 +13,7 @@ services:
       - AGENT_MEMORY_ADMIN_TOKEN=${AGENT_MEMORY_ADMIN_TOKEN:?}
     # If BGE-M3 is a sibling llama service container, replace 127.0.0.1 with
     # the service name and port, e.g. http://bge-m3:8001
-    - AGENT_MEMORY_EMBEDDING_ENDPOINT=http://127.0.0.1:8001
+      - AGENT_MEMORY_EMBEDDING_ENDPOINT=http://127.0.0.1:8001
 
 volumes:
   agent-memory-data:

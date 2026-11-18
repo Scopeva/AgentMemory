@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 from agent_memory.config import RetrievalConfig
-from agent_memory.retrieval.chunker import ChunkerConfig, chunk_knowledge, build_search_text
+from agent_memory.retrieval.chunker import ChunkerConfig, chunk_knowledge
 from agent_memory.retrieval.lexical import LexicalIndex
 from agent_memory.retrieval.vector import VectorIndex, create_vector_index
 
@@ -60,8 +60,28 @@ class IndexingWorker:
         summary = knowledge.get("summary", "")
         indexed = 0
 
+        self._clear_knowledge_index(memory_id)
+
         for chunk in chunks:
             chunk_id = f"{memory_id}:{chunk.chunk_index}"
+            self._conn.execute(
+                "INSERT INTO chunks ("
+                "chunk_id, project_id, memory_id, document_type, chunk_index, "
+                "char_start, char_end, token_estimate, title, summary, text, active, indexed_at"
+                ") VALUES (?, ?, ?, 'knowledge', ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))",
+                (
+                    chunk_id,
+                    knowledge.get("project_id", ""),
+                    memory_id,
+                    chunk.chunk_index,
+                    chunk.char_start,
+                    chunk.char_end,
+                    chunk.token_estimate,
+                    title,
+                    summary,
+                    chunk.text,
+                ),
+            )
             # Lexical upsert
             self._lexical.upsert_chunk(
                 chunk_id=chunk_id,
@@ -76,7 +96,6 @@ class IndexingWorker:
 
         # Vector upsert (if provider available)
         if self._embedder is not None:
-            import asyncio
             texts = [c.text for c in chunks if c.text.strip()]
             if texts:
                 embeddings = await self._embedder.embed(texts)
@@ -111,11 +130,14 @@ class IndexingWorker:
         self._conn.commit()
         return {"docs_indexed": len(items), "chunks_indexed": total}
 
-    def delete_knowledge_index(self, memory_id: str, chunk_count: int = 0) -> None:
+    def delete_knowledge_index(self, memory_id: str) -> None:
         """Remove lexical + vector entries for a knowledge row."""
-        for i in range(max(chunk_count, 1)):
-            chunk_id = f"{memory_id}:{i}"
-            self._lexical.delete_chunk(chunk_id)
+        self._clear_knowledge_index(memory_id)
+        self._conn.commit()
+
+    def _clear_knowledge_index(self, memory_id: str) -> None:
+        """Remove all derived entries before reindexing or deleting a memory."""
+        self._conn.execute("DELETE FROM chunks_fts WHERE entity_id = ?", (memory_id,))
+        self._conn.execute("DELETE FROM chunks WHERE memory_id = ?", (memory_id,))
         if self._vector:
             self._vector.delete(memory_id)
-        self._conn.commit()

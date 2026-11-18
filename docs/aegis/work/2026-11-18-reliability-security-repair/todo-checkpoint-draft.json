@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-11-18-reliability-security-repair",
+  "currentTodo": "Final handoff",
+  "completedTodos": [
+    "Implemented and verified every item in the reliability/security repair plan."
+  ],
+  "activeSlice": "final verification",
+  "evidenceRefs": [
+    "evidence-bundle-draft-verification.json"
+  ],
+  "blockedOn": null,
+  "nextStep": "Review the working-tree diff and commit when ready.",
+  "updatedAt": "2026-11-18"
+}

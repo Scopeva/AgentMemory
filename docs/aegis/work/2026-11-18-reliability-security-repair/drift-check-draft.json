@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-11-18-reliability-security-repair",
+  "taskIntentRef": "docs/aegis/work/2026-11-18-reliability-security-repair/task-intent-draft.json",
+  "baselineRefs": [
+    "docs/aegis/BASELINE-GOVERNANCE.md"
+  ],
+  "scopeStatus": "All plan items completed without scope expansion.",
+  "compatStatus": "Legacy unenforced MCP allowlist remains parse-compatible and has no security effect.",
+  "retirementStatus": "Duplicated permissive admin checks and false ACL documentation retired.",
+  "newRiskSignals": [
+    "Startup recovery assumes one service process; code records this constraint."
+  ],
+  "decision": "continue"
+}

@@ -74,16 +74,39 @@ class TestRetrievalRoutes:
         conn.commit()
         conn.close()
 
-    def test_admin_index_status_requires_no_token_by_default(self, app):
-        # No admin token configured -> endpoint open
+    def test_admin_index_status_fails_closed_without_configuration(self, app):
         resp = app.get("/v1/admin/index/status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "pending_index_jobs" in data
-        assert "vector_available" in data
+        assert resp.status_code == 503
 
-    def test_admin_drain_reports_disabled_or_drained(self, app):
-        resp = app.post("/v1/admin/index/drain")
+    def test_admin_routes_require_the_configured_token(self, app, monkeypatch):
+        monkeypatch.setenv("AGENT_MEMORY_ADMIN_TOKEN", "test-token")
+        assert app.get("/v1/admin/index/status").status_code == 403
+        resp = app.get("/v1/admin/index/status", headers={"X-Admin-Token": "test-token"})
+        assert resp.status_code == 200
+        assert "pending_index_jobs" in resp.json()
+
+        assert app.get("/v1/admin/pending").status_code == 403
+        assert app.get("/v1/admin/pending", headers={"X-Admin-Token": "test-token"}).status_code == 200
+
+    def test_admin_drain_reports_disabled_or_drained(self, app, monkeypatch):
+        monkeypatch.setenv("AGENT_MEMORY_ADMIN_TOKEN", "test-token")
+        resp = app.post("/v1/admin/index/drain", headers={"X-Admin-Token": "test-token"})
         assert resp.status_code == 200
         data = resp.json()
         assert "drained" in data
+
+    def test_delete_knowledge_requires_the_configured_token(self, app, monkeypatch):
+        self._seed_project(app, "p1")
+        created = app.post(
+            "/v1/knowledge",
+            json={"project_id": "p1", "type": "note", "title": "T", "content": "C"},
+        ).json()
+        monkeypatch.setenv("AGENT_MEMORY_ADMIN_TOKEN", "test-token")
+
+        path = f"/v1/knowledge/{created['memory_id']}?revision=1"
+        assert app.delete(path).status_code == 403
+        assert app.delete(path, headers={"X-Admin-Token": "test-token"}).status_code == 200
+
+    def test_blank_search_is_rejected(self, app):
+        resp = app.get("/v1/search", params={"project_id": "p1", "query": "   "})
+        assert resp.status_code == 422
