@@ -140,9 +140,28 @@ function clearSpool(): void {
 }
 
 // ── HTTP flush ─────────────────────────────────────────────────────────────
+let _projectRegistered = false;
+
+async function ensureProject(): Promise<void> {
+  if (_projectRegistered) return;
+  try {
+    await fetch(`${SERVER_URL}/v1/projects/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_id: PROJECT_ID }),
+    });
+    _projectRegistered = true;
+  } catch {
+    // server unreachable — will retry on next flush
+  }
+}
+
 async function flushToServer(): Promise<boolean> {
   const allEvents = [...readSpool(), ...buffer.splice(0, buffer.length)];
   if (allEvents.length === 0) return true;
+
+  // Auto-register project (idempotent) before sending events.
+  await ensureProject();
 
   try {
     const resp = await fetch(`${SERVER_URL}/v1/events/batch`, {

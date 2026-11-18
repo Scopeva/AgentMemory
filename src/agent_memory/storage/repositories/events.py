@@ -19,6 +19,18 @@ async def insert_event(db: Database, event: EventEnvelope) -> bool:
     """Insert event idempotently. Returns True if newly inserted, False if duplicate."""
     now = _utcnow()
     async with db.connection() as conn:
+        # Auto-register project if it appears in an event but is not yet in the projects table.
+        if event.project_id:
+            cursor = await conn.execute(
+                "SELECT 1 FROM projects WHERE project_id = ?", (event.project_id,)
+            )
+            if not await cursor.fetchone():
+                await conn.execute(
+                    "INSERT OR IGNORE INTO projects "
+                    "(project_id, name, status, created_at, updated_at) "
+                    "VALUES (?, ?, 'active', ?, ?)",
+                    (event.project_id, event.project_id, now, now),
+                )
         # Check by event_id (idempotency key)
         cursor = await conn.execute(
             "SELECT 1 FROM events WHERE event_id = ?", (event.event_id,)

@@ -189,6 +189,7 @@ class EventClient:
 
     - at-least-once delivery: caller retries using the spool.
     - idempotent: server deduplicates by event_id.
+    - auto-registers unknown projects before the first batch flush.
     """
 
     def __init__(
@@ -202,6 +203,30 @@ class EventClient:
         self.agent = agent
         self._client = httpx.Client(timeout=timeout)
         self.spool = spool or DurableSpool(agent)
+        self._registered_projects: set[str] = set()
+
+    def register_project(self, project_id: str) -> bool:
+        """Register a project on the server (idempotent). Returns True on success."""
+        if not project_id or project_id in self._registered_projects:
+            return False
+        try:
+            resp = self._client.post(
+                f"{self.base_url}/v1/projects/register",
+                json={"project_id": project_id},
+                timeout=5.0,
+            )
+            resp.raise_for_status()
+            self._registered_projects.add(project_id)
+            return True
+        except httpx.HTTPError:
+            return False
+
+    def ensure_projects(self, events: list[dict]) -> None:
+        """Register all distinct project_ids from a batch before flushing."""
+        for ev in events:
+            pid = ev.get("project_id")
+            if pid:
+                self.register_project(pid)
 
     def submit(self, event: dict) -> dict:
         """Submit a single event. Falls back to spool on failure."""
@@ -225,6 +250,7 @@ class EventClient:
     def submit_batch(self, events: list[dict]) -> dict:
         for ev in events:
             ev.setdefault("agent", self.agent)
+        self.ensure_projects(events)
         try:
             resp = self._client.post(
                 f"{self.base_url}/v1/events/batch",
