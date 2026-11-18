@@ -35,13 +35,25 @@ async def list_projects(request: Request) -> dict:
 
 @router.get("/projects/{project_id}")
 async def get_project(request: Request, project_id: str) -> dict:
-    """Return a single project by ID."""
+    """Return a single project by ID.
+
+    Lenient: an unknown project_id still returns a 200 shell so dashboard
+    sub-panels (events/runs/...) can render their own "no data" state
+    instead of a 404. Register it via POST /v1/projects/register to make
+    it a first-class project.
+    """
     from agent_memory.storage.repositories import projects as repo
 
     db = request.app.state.db
     p = await repo.get_project(db, project_id)
     if p is None:
-        raise HTTPException(404, f"project {project_id} not found")
+        return {
+            "project_id": project_id,
+            "name": project_id,
+            "status": "unregistered",
+            "created_at": None,
+            "updated_at": None,
+        }
     return _project_to_dict(p)
 
 
