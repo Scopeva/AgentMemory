@@ -6,6 +6,7 @@ Entries are workspace records, not authoritative runtime decisions.
 | Date | Kind | Path | Title |
 | --- | --- | --- | --- |
 | 2026-11-18 | plan | docs/aegis/plans/2026-11-18-reliability-security-repair.md | Reliability and Security Repair |
+| 2026-11-18 | plan | docs/aegis/plans/2026-11-18-plugin-delivery-repair.md | Plugin Delivery Repair |
 | 2026-11-18 | work | docs/aegis/work/2026-11-18-reliability-security-repair/10-intent.md | Reliability and Security Repair intent |
 | 2026-11-18 | work | docs/aegis/work/2026-11-18-reliability-security-repair/20-checkpoint.md | Reliability and Security Repair checkpoint |
 | 2026-11-18 | work | docs/aegis/work/2026-11-18-reliability-security-repair/90-evidence.md | Reliability and Security Repair evidence |

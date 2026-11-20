@@ -16,12 +16,23 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MCP_URL="${AGENT_MEMORY_MCP_URL:-http://127.0.0.1:8765/mcp/}"
 
 PLUGIN_DIR="${OPENCODE_PLUGIN_DIR:-$HOME/.config/opencode/plugins}"
 mkdir -p "$PLUGIN_DIR"
 
 echo "==> Copying plugin to $PLUGIN_DIR/agent-memory.ts"
 cp "${SCRIPT_DIR}/agent-memory.ts" "$PLUGIN_DIR/agent-memory.ts"
+
+if [ "${AGENT_MEMORY_SKIP_MCP_REGISTRATION:-}" != "1" ]; then
+  OPENCODE_BIN="${OPENCODE_BIN:-opencode}"
+  if ! command -v "$OPENCODE_BIN" >/dev/null 2>&1; then
+    echo "OpenCode executable not found; set OPENCODE_BIN or register $MCP_URL manually." >&2
+    exit 1
+  fi
+  "$OPENCODE_BIN" mcp add --global agent-memory --url "$MCP_URL"
+  echo "==> Registered Agent Memory MCP server at $MCP_URL"
+fi
 
 echo
 echo "============================================================"

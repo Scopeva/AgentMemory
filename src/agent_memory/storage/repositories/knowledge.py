@@ -243,8 +243,8 @@ async def insert_memory_candidate(
     run_id: Optional[str],
     idempotency_key: str,
     memory_json: dict,
-) -> bool:
-    """Insert a candidate memory. Returns False if duplicate (idempotency)."""
+) -> Optional[str]:
+    """Insert a candidate memory and return its ID, or ``None`` if duplicate."""
     now = _utcnow()
     async with db.connection() as conn:
         cursor = await conn.execute(
@@ -252,7 +252,7 @@ async def insert_memory_candidate(
             (project_id, idempotency_key),
         )
         if await cursor.fetchone():
-            return False
+            return None
         import uuid
 
         candidate_id = str(uuid.uuid4())
@@ -271,7 +271,7 @@ async def insert_memory_candidate(
             ),
         )
         await conn.commit()
-        return True
+        return candidate_id
 
 
 async def list_pending_candidates(

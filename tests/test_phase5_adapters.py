@@ -51,6 +51,19 @@ def _event_types(records: list[dict]) -> list[str]:
 
 
 class TestCodexAdapter:
+    def test_separate_hook_processes_get_distinct_sequences(self, tmp_path: Path, monkeypatch):
+        """Fresh hook observers must not reuse a run's natural event key."""
+        from adapters.codex import codex_adapter
+
+        ticks = iter((100, 200))
+        monkeypatch.setattr(codex_adapter.time, "time_ns", lambda: next(ticks))
+        cfg = CodexAdapterConfig(server_url="http://127.0.0.1:1", spool_root=str(tmp_path))
+        CodexAdapter(cfg).on_session_start("s1", "native1")
+        CodexAdapter(cfg).on_stop("s1", "completed")
+
+        sequences = [rec["event"]["sequence_no"] for rec in _read_spool("codex", tmp_path)]
+        assert sequences == [101, 201]
+
     def test_full_lifecycle_spooled_when_unreachable(self, tmp_path: Path):
         """All hook events are spooled when the server is unreachable."""
         cfg = CodexAdapterConfig(server_url="http://127.0.0.1:1", spool_root=str(tmp_path))

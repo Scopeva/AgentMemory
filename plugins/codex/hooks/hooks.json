@@ -1,51 +1,9 @@
 {
   "description": "agent-memory: persist Codex session lifecycle to the local memory server",
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${PLUGIN_ROOT}/hooks/am_session_start.py",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${PLUGIN_ROOT}/hooks/am_pre_compact.py",
-            "timeout": 5,
-            "statusMessage": "Capturing pre-compact context"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${PLUGIN_ROOT}/hooks/am_stop.py",
-            "timeout": 30,
-            "statusMessage": "Recording run result"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${PLUGIN_ROOT}/hooks/am_session_end.py",
-            "timeout": 3
-          }
-        ]
-      }
-    ]
+    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 ${PLUGIN_ROOT}/hooks/am_session_start.py", "timeout": 5}]}],
+    "PreCompact": [{"hooks": [{"type": "command", "command": "python3 ${PLUGIN_ROOT}/hooks/am_pre_compact.py", "timeout": 5, "statusMessage": "Capturing pre-compact context"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "python3 ${PLUGIN_ROOT}/hooks/am_stop.py", "timeout": 30, "statusMessage": "Recording run result"}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "python3 ${PLUGIN_ROOT}/hooks/am_session_end.py", "timeout": 3}]}]
   }
 }

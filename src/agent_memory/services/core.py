@@ -285,24 +285,16 @@ async def submit_memory_candidate(
     run_id: Optional[str] = None,
 ) -> dict:
     """Submit memory candidates. Idempotent per key; one candidate per memory.
-
-    Each new candidate also enqueues an index job so the retrieval layer
-    picks it up when the dispatcher drains.
     """
     inserted: list[str] = []
     duplicates = 0
     for memory in memories:
-        new = await repo.knowledge.insert_memory_candidate(
+        candidate_id = await repo.knowledge.insert_memory_candidate(
             db, project_id, run_id, idempotency_key=f"{idempotency_key}:{memory.get('title','')}",
             memory_json=memory,
         )
-        if new:
-            inserted.append(str(memory.get("memory_id", "")))
-            # Enqueue index job for the new knowledge row
-            if _job_dispatcher is not None:
-                memory_id = str(memory.get("memory_id", ""))
-                if memory_id:
-                    _job_dispatcher.enqueue_index(memory_id, project_id)
+        if candidate_id:
+            inserted.append(candidate_id)
         else:
             duplicates += 1
     return {
@@ -405,12 +397,36 @@ async def reject_knowledge(
 # ---------------------------------------------------------------------------
 
 
+async def _capture_extracted_memories(db: Database, event: EventEnvelope) -> None:
+    """Store an explicit extraction result as reviewable candidates.
+
+    Lifecycle plugins do not infer memories; this only consumes structured
+    results supplied by an agent. Replaying an event safely retries candidate
+    storage because candidate insertion is idempotent by event ID and title.
+    """
+    if event.event_type != "memory.extraction_completed" or not event.project_id:
+        return
+    memories = event.payload.get("memories")
+    if not isinstance(memories, list):
+        return
+    structured_memories = [memory for memory in memories if isinstance(memory, dict)]
+    if structured_memories:
+        await submit_memory_candidate(
+            db,
+            event.project_id,
+            event.event_id,
+            structured_memories,
+            run_id=event.run_id,
+        )
+
+
 async def submit_event(db: Database, event: EventEnvelope) -> dict:
     """Persist a lifecycle event idempotently.
 
     Returns status: 'created' or 'duplicate'.
     """
     created = await repo.events.insert_event(db, event)
+    await _capture_extracted_memories(db, event)
     return {
         "event_id": event.event_id,
         "status": "created" if created else "duplicate",
@@ -423,6 +439,7 @@ async def submit_events_batch(db: Database, events: list[EventEnvelope]) -> dict
     duplicates = 0
     for evt in events:
         was_new = await repo.events.insert_event(db, evt)
+        await _capture_extracted_memories(db, evt)
         if was_new:
             created += 1
         else:
@@ -524,9 +541,14 @@ async def approve_candidate(
     Returns the new knowledge memory_id if auto_accept=True and promotion
     succeeded, otherwise None.
     """
-    return await repo.knowledge.approve_candidate(
+    memory_id = await repo.knowledge.approve_candidate(
         db, candidate_id, decided_by=decided_by, auto_accept=auto_accept
     )
+    if memory_id and _job_dispatcher is not None:
+        record = await repo.knowledge.get_knowledge(db, memory_id)
+        if record:
+            _job_dispatcher.enqueue_index(memory_id, record["knowledge"]["project_id"])
+    return memory_id
 
 
 async def reject_candidate(

@@ -1,9 +1,8 @@
 # Agent Plugins
 
-Installable plugin packages for the three supported coding agents. Each
-plugin is a thin shell over the shared `adapters/` code in this repo:
-it reads the same `AGENT_MEMORY_*` env vars and persists events through
-the durable spool.
+Installable integrations for the three supported coding agents. They share
+the `AGENT_MEMORY_*` configuration and persist lifecycle events through a
+durable local spool.
 
 ```
 plugins/
@@ -13,16 +12,13 @@ plugins/
 │   │   ├── am_session_start.py
 │   │   ├── am_pre_compact.py
 │   │   ├── am_stop.py
-│   │   ├── am_session_end.py
-│   │   └── hooks.json           # Codex hooks config template
+│   │   └── am_session_end.py
 │   └── install_codex.sh
 ├── opencode/
-│   ├── agent-memory.ts          # OpenCode TypeScript plugin (batch mode)
-│   ├── opencode_bridge.py       # single-event bridge (legacy, kept for reference)
-│   ├── opencode_bridge_batch.py # long-lived batch bridge (one process, many events)
+│   ├── agent-memory.ts          # OpenCode 2.x TypeScript plugin
 │   └── install_opencode.sh
 └── pi/
-    ├── pi_extension.py          # installable Pi extension entry
+    ├── agent-memory.ts          # Pi TypeScript extension
     └── install_pi.sh
 ```
 
@@ -40,9 +36,12 @@ export AGENT_MEMORY_WORKSPACE_ID=main                    # optional
 export AGENT_MEMORY_TASK_ID=feat-x                       # optional
 ```
 
-`AGENT_MEMORY_REPO_ROOT` is what lets the hook scripts / TS plugin import
-the `adapters` package at runtime. Without it, each plugin falls back to
-auto-detecting the repo by walking up from its own location.
+`AGENT_MEMORY_REPO_ROOT` is needed only by the Codex Python hooks. Its
+installer embeds the current repository path in the registered commands, so
+you normally do not need to export it manually.
+
+The Codex installer uses this repository's `.venv/bin/python` by default. If
+your environment lives elsewhere, set `AGENT_MEMORY_PYTHON` before installing.
 
 `AGENT_MEMORY_PROJECT_ID` is **optional**: when unset, the adapter
 auto-detects it from your working directory (git repo basename, or CWD
@@ -86,12 +85,10 @@ tests or team-shared configs checked into the repo).
 ```
 
 What happens:
-1. The four Python hook scripts + a generated `hooks.json` are copied
-   into `~/.codex/hooks/` (or `$CODEX_HOME/hooks` if set).
-2. `hooks.json` is rewritten so `${PLUGIN_ROOT}` resolves to the install
-   directory.
-3. Codex auto-discovers `hooks.json` in its config layer; no manifest
-   needed.
+1. The four Python hook scripts are copied into `~/.codex/agent-memory/`
+   (or `$CODEX_HOME/agent-memory/` if set).
+2. The installer merges only Agent Memory entries into the active
+   `$CODEX_HOME/hooks.json` registry and retains a first-install backup.
 
 Then in the Codex CLI:
 - Run `/hooks` to **review and trust** the four new hooks (Codex will
@@ -106,12 +103,11 @@ Then in the Codex CLI:
 ```
 
 What happens:
-1. `agent-memory.ts` is copied to `~/.config/opencode/plugin/` (or
+1. `agent-memory.ts` is copied to `~/.config/opencode/plugins/` (or
    `$OPENCODE_PLUGIN_DIR` if set).
-2. The TS plugin spawns **one** long-lived Python bridge
-   (`opencode_bridge_batch.py`) and pipes every event to its stdin as
-   a JSON line — no per-message process fork. The bridge persists +
-   flushes internally, closing on session end.
+2. The OpenCode 2.x plugin consumes its async lifecycle event stream,
+   posts first-session and terminal-run batches directly, and spools on
+   delivery failure.
 3. OpenCode loads the plugin automatically on startup. No further
    install step.
 
@@ -122,11 +118,11 @@ What happens:
 ```
 
 What happens:
-1. `plugins/pi/pi_extension.py` is symlinked into
-   `~/.config/pi/extensions/agent-memory-pi.py` (or
-   `$PI_EXTENSIONS_DIR` if set).
-2. Pi's extension mechanism loads it and calls the `on_*` functions at
-   the matching lifecycle points.
+1. `plugins/pi/agent-memory.ts` is copied to
+   `~/.pi/agent/extensions/agent-memory-pi.ts` (or `$PI_EXTENSIONS_DIR`
+   if set).
+2. Pi loads it and the extension reads the current session ID from the
+   extension context rather than from lifecycle payloads.
 
 ## Verify (all agents)
 
@@ -148,3 +144,8 @@ python -m memoryctl memory search --project-id my-project "关键词"
 - **At-least-once delivery**: each adapter writes to a durable spool
   before hitting the network. If the server is down, events are
   replayed on the next session start.
+- **Memory content**: lifecycle hooks create projects and record events. To
+  create reviewable memory candidates, an agent must call the MCP
+  `submit_memory_candidate` tool or post a structured
+  `memory.extraction_completed.memories` payload. The plugins never send
+  transcript text to an external model automatically.

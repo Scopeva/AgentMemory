@@ -66,6 +66,7 @@ type AmEvent = {
 
 let seq = 0;
 const buffer: AmEvent[] = [];
+const turnOutcomes = new Map<string, "completed" | "failed" | "interrupted">();
 
 function genUuid(): string {
   const b = globalThis.crypto.getRandomValues(new Uint8Array(16));
@@ -145,12 +146,12 @@ let _projectRegistered = false;
 async function ensureProject(): Promise<void> {
   if (_projectRegistered) return;
   try {
-    await fetch(`${SERVER_URL}/v1/projects/register`, {
+    const response = await fetch(`${SERVER_URL}/v1/projects/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ project_id: PROJECT_ID }),
     });
-    _projectRegistered = true;
+    _projectRegistered = response.ok;
   } catch {
     // server unreachable — will retry on next flush
   }
@@ -185,105 +186,69 @@ async function flushToServer(): Promise<boolean> {
   }
 }
 
-// ── extraction guard (per-run, mirrors Python RunGuard) ──────────────────
-const guards = new Map<string, { extractionAttempted: boolean; origin: string }>();
-
-function allowExtraction(runId: string): boolean {
-  let g = guards.get(runId);
-  if (!g) {
-    g = { extractionAttempted: false, origin: "user" };
-    guards.set(runId, g);
-  }
-  if (g.origin === "memory_extraction") return false;
-  if (g.extractionAttempted) return false;
-  return true;
-}
-
-function markExtractionAttempted(runId: string): void {
-  const g = guards.get(runId);
-  if (g) {
-    g.extractionAttempted = true;
-    g.origin = "memory_extraction";
-  }
-}
-
-function resetGuard(runId: string): void {
-  guards.delete(runId);
-}
-
 // ── Pi factory (default export) ───────────────────────────────────────────
+type PiContext = {
+  sessionManager: { getSessionId(): string };
+};
+
+function sessionId(ctx: PiContext): string {
+  return ctx.sessionManager.getSessionId();
+}
+
 export default function agentMemoryExtension(
   pi: {
     on: (
       event: string,
       handler: (
         event: Record<string, unknown>,
-        ctx: Record<string, unknown>,
+        ctx: PiContext,
       ) => void | Promise<void>,
     ) => () => void;
   },
 ): void {
-  pi.on("session_start", (evt: Record<string, unknown>) => {
-    const sessionId = String(evt.sessionId ?? evt.session_id ?? "");
-    const nativeSessionId = String(evt.nativeSessionId ?? evt.native_session_id ?? "");
-    if (sessionId) {
-      push("session.start", sessionId, sessionId, {
-        native_session_id: nativeSessionId,
-      });
+  pi.on("session_start", (_evt, ctx) => {
+    const id = sessionId(ctx);
+    if (id) {
+      push("session.start", id, id, { native_session_id: id });
+      // Flush immediately so the server creates the project at session start.
+      void flushToServer();
     }
   });
 
-  pi.on("agent_start", (evt: Record<string, unknown>) => {
-    const sessionId = String(evt.sessionId ?? evt.session_id ?? "");
-    const runId = String(evt.runId ?? evt.run_id ?? sessionId);
-    const headSha = String(evt.headSha ?? evt.head_sha ?? "");
-    if (sessionId) {
-      push("run.started", sessionId, runId, { head_sha_start: headSha });
+  pi.on("agent_start", (_evt, ctx) => {
+    const id = sessionId(ctx);
+    if (id) {
+      push("run.started", id, id);
     }
   });
 
-  pi.on("turn_end", (evt: Record<string, unknown>) => {
-    const sessionId = String(evt.sessionId ?? evt.session_id ?? "");
-    const runId = String(evt.runId ?? evt.run_id ?? sessionId);
+  pi.on("turn_end", (evt, ctx) => {
+    const id = sessionId(ctx);
     const turnIndex = Number(evt.turnIndex ?? evt.turn_index ?? 0);
-    if (sessionId) {
-      push("turn.end", sessionId, runId, { turn_index: turnIndex });
+    if (id) {
+      const outcome = evt.outcome;
+      if (outcome === "error") turnOutcomes.set(id, "failed");
+      else if (outcome === "aborted") turnOutcomes.set(id, "interrupted");
+      else if (outcome === "completed") turnOutcomes.set(id, "completed");
+      push("turn.end", id, id, { turn_index: turnIndex });
     }
   });
 
-  pi.on("agent_settled", (evt: Record<string, unknown>) => {
-    const sessionId = String(evt.sessionId ?? evt.session_id ?? "");
-    const runId = String(evt.runId ?? evt.run_id ?? sessionId);
-    const outcome = String(evt.outcome ?? "completed");
-    const headShaEnd = String(evt.headShaEnd ?? evt.head_sha_end ?? "");
-    const hadCodeChanges = Boolean(evt.hadCodeChanges ?? evt.had_code_changes ?? false);
-    const taskSignificant = Boolean(evt.taskSignificant ?? evt.task_significant ?? false);
-
-    if (sessionId) {
-      push("run.settled", sessionId, runId, {
-        outcome,
-        head_sha_end: headShaEnd,
+  pi.on("agent_settled", (evt, ctx) => {
+    const id = sessionId(ctx);
+    if (id) {
+      push("run.settled", id, id, {
+        outcome: evt.aborted ? "interrupted" : (turnOutcomes.get(id) ?? "completed"),
       });
-
-      // Decide if extraction should be requested
-      if (allowExtraction(runId)) {
-        if (
-          (outcome === "completed" && hadCodeChanges) ||
-          (outcome === "completed" && taskSignificant) ||
-          outcome === "failed" ||
-          outcome === "interrupted"
-        ) {
-          push("memory.extraction_requested", sessionId, runId, {});
-          markExtractionAttempted(runId);
-        }
-      }
+      turnOutcomes.delete(id);
+      void flushToServer();
     }
   });
 
-  pi.on("session_shutdown", (evt: Record<string, unknown>) => {
-    const sessionId = String(evt.sessionId ?? evt.session_id ?? "");
-    if (sessionId) {
-      push("session.end", sessionId, sessionId, {});
+  pi.on("session_shutdown", (_evt, ctx) => {
+    const id = sessionId(ctx);
+    if (id) {
+      push("session.end", id, id, {});
     }
     // Fire-and-forget flush; never block Pi shutdown.
     void flushToServer();
@@ -291,5 +256,5 @@ export default function agentMemoryExtension(
 }
 
 // ── named exports for programmatic use (optional) ────────────────────────
-export { flushToServer, push, allowExtraction, markExtractionAttempted, resetGuard };
+export { flushToServer, push };
 export type { AmEvent };

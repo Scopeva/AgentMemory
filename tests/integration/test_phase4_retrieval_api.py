@@ -30,7 +30,7 @@ def app(tmp_path):
         retrieval=RetrievalConfig(),
     )
     app = create_app(config)
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
         yield client
 
 
@@ -110,3 +110,78 @@ class TestRetrievalRoutes:
     def test_blank_search_is_rejected(self, app):
         resp = app.get("/v1/search", params={"project_id": "p1", "query": "   "})
         assert resp.status_code == 422
+
+    def test_mcp_endpoint_initializes(self, app):
+        response = app.post(
+            "/mcp/",
+            headers={"Accept": "application/json, text/event-stream"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "pytest", "version": "1"},
+                },
+            },
+        )
+        assert response.status_code == 200
+        assert '"name":"agent-memory"' in response.text
+
+    def test_completed_extraction_creates_one_candidate_and_indexes_on_accept(
+        self, app, monkeypatch
+    ):
+        event = {
+            "event_id": "extract-once",
+            "event_type": "memory.extraction_completed",
+            "agent": "pi",
+            "session_id": "session-1",
+            "run_id": "run-1",
+            "project_id": "project-from-event",
+            "sequence_no": 1,
+            "payload": {
+                "memories": [
+                    {
+                        "type": "decision",
+                        "title": "Use WAL",
+                        "content": "Keep SQLite in WAL mode.",
+                        "scope": "project",
+                    }
+                ]
+            },
+        }
+        assert app.post("/v1/events", json=event).status_code == 202
+        assert app.post("/v1/events", json=event).json()["status"] == "duplicate"
+
+        monkeypatch.setenv("AGENT_MEMORY_ADMIN_TOKEN", "test-token")
+        headers = {"X-Admin-Token": "test-token"}
+        candidates = app.get(
+            "/v1/admin/pending", params={"project_id": "project-from-event"}, headers=headers
+        ).json()["candidates"]
+        assert len(candidates) == 1
+        assert candidates[0]["memory"]["title"] == "Use WAL"
+
+        accepted = app.post(
+            f"/v1/admin/approvals/{candidates[0]['candidate_id']}/approve?auto_accept=true",
+            headers=headers,
+        ).json()
+        assert accepted["memory_id"]
+
+        import sqlite3
+
+        conn = sqlite3.connect(app.app.state.db.path)
+        project = conn.execute(
+            "SELECT project_id FROM projects WHERE project_id = ?", ("project-from-event",)
+        ).fetchone()
+        run = conn.execute(
+            "SELECT run_id, session_id FROM runs WHERE run_id = ?", ("run-1",)
+        ).fetchone()
+        job = conn.execute(
+            "SELECT memory_id, project_id FROM index_jobs WHERE memory_id = ?",
+            (accepted["memory_id"],),
+        ).fetchone()
+        conn.close()
+        assert project == ("project-from-event",)
+        assert run == ("run-1", "session-1")
+        assert job == (accepted["memory_id"], "project-from-event")

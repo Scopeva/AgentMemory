@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 
 from agent_memory.config import DatabaseConfig
+from agent_memory.services import core
 from agent_memory.storage.database import Database
 from agent_memory.storage import repositories as repo
 from agent_memory.storage.repositories.knowledge import (
@@ -205,8 +207,26 @@ class TestKnowledge:
     async def test_memory_candidate_idempotency(self, db):
         p = await register_project(db, Project(name="mc-project"))
         memory = {"type": "adr", "title": "X", "content": "Y", "scope": "project"}
-        assert await insert_memory_candidate(db, p.project_id, None, "key-1", memory) is True
-        assert await insert_memory_candidate(db, p.project_id, None, "key-1", memory) is False
+        candidate_id = await insert_memory_candidate(db, p.project_id, None, "key-1", memory)
+        assert uuid.UUID(candidate_id)
+        assert await insert_memory_candidate(db, p.project_id, None, "key-1", memory) is None
+
+    @pytest.mark.asyncio
+    async def test_submit_memory_candidate_returns_persisted_candidate_id(self, db):
+        p = await register_project(db, Project(name="mc-service-project"))
+        memory = {"type": "adr", "title": "X", "content": "Y", "scope": "project"}
+
+        created = await core.submit_memory_candidate(db, p.project_id, "key-1", [memory])
+        assert len(created["candidate_ids"]) == 1
+        assert uuid.UUID(created["candidate_ids"][0])
+        assert created["duplicate_count"] == 0
+
+        duplicate = await core.submit_memory_candidate(db, p.project_id, "key-1", [memory])
+        assert duplicate == {
+            "candidate_ids": [],
+            "validation_status": ["duplicate"],
+            "duplicate_count": 1,
+        }
 
 
 # ---------------------------------------------------------------------------

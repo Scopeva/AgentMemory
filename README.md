@@ -163,6 +163,11 @@ These come from `adapters/shared/event_client.py` — every adapter
 (Pi / Codex / OpenCode) reads the same vars, so a single shell profile
 or `.env` file works for all of them.
 
+The installers also register the agent-facing MCP endpoint at
+`http://127.0.0.1:8765/mcp/`. It exposes `submit_memory_candidate` and the
+memory/query tools to all three clients; the lifecycle plugins alone only
+record events.
+
 #### Project-ID Auto-Detection
 
 `AGENT_MEMORY_PROJECT_ID` is **optional**. When unset (or empty), the
@@ -204,25 +209,17 @@ uses `host.docker.internal:8001`).
 
 ### 3. Pi
 
-Pi supports extensions; wire the lifecycle hooks to
-`adapters/pi/pi_extension.py`:
+Install the TypeScript extension into Pi's active global extension directory:
 
-```python
-# Inside your Pi extension entry point
-import sys
-sys.path.insert(0, "<repo>/adapters/pi")
-from pi_extension import (
-    on_session_start, on_run_started, on_turn_end,
-    on_session_before_compact, on_run_settled,
-    submit_extraction_result, on_run_interrupted, on_session_shutdown,
-    get_capabilities,
-)
+```bash
+bash plugins/pi/install_pi.sh
 ```
 
-Call each hook at the corresponding Pi lifecycle point. `on_run_settled`
-returns `{"extract": true}` when it thinks extraction is warranted; then
-the model produces the structured result and you call
-`submit_extraction_result` to persist it.
+It records session/run/turn lifecycle events and flushes a session-start event
+immediately, which creates the project on the server. A structured extraction
+result still needs to be submitted through MCP or as a
+`memory.extraction_completed` event; lifecycle telemetry never sends chat text
+to another model automatically.
 
 ### 4. Codex
 
@@ -231,12 +228,14 @@ hooks are declared in `~/.codex/hooks.json`; each is a thin shell wrapper
 that calls into the shared bootstrap:
 
 ```
-~/.codex/hooks/
-├── _bootstrap.py          # shared: sys.path setup, env, project_id detection
-├── am_session_start.py    # SessionStart  → CodexAdapter.on_session_start()
-├── am_pre_compact.py      # PreCompact    → CodexAdapter.on_pre_compact()
-├── am_stop.py             # Stop          → CodexAdapter.on_stop()
-├── am_session_end.py      # SessionEnd    → CodexAdapter.on_session_end()
+~/.codex/
+├── hooks.json             # global registry; installer preserves other hooks
+├── agent-memory/
+│   ├── _bootstrap.py      # shared: sys.path setup, env, project_id detection
+│   ├── am_session_start.py # SessionStart → CodexAdapter.on_session_start()
+│   ├── am_pre_compact.py   # PreCompact → CodexAdapter.on_pre_compact()
+│   ├── am_stop.py          # Stop → CodexAdapter.on_stop()
+│   └── am_session_end.py   # SessionEnd → CodexAdapter.on_session_end()
 └── …
 ```
 
@@ -246,31 +245,24 @@ same env vars and auto-detects `project_id` via the alias table when
 `AGENT_MEMORY_PROJECT_ID` is unset.
 
 **Install:** `bash plugins/codex/install_codex.sh` copies the hooks to
-`~/.codex/hooks/` and merges entries into `~/.codex/hooks.json` (run
+`~/.codex/agent-memory/` and merges entries into `~/.codex/hooks.json` (run
 `/hooks` in Codex CLI once to trust them).
 
 ### 5. OpenCode
 
-OpenCode supports project-level TypeScript plugins; also observe-only.
-The plugin uses a **long-lived batch bridge** — one Python process per
-session, not one per message:
+OpenCode 2.x supports TypeScript plugins; this one subscribes to the server's
+native async event stream and delivers lifecycle events directly over HTTP:
 
 ```
 plugins/opencode/
-├── agent-memory.ts            # OpenCode plugin entry point (TypeScript)
-├── opencode_bridge_batch.py   # long-lived bridge: reads stdin lines, flushes on exit
-└── opencode_bridge.py         # legacy single-event bridge (kept for reference)
+└── agent-memory.ts            # OpenCode 2.x plugin entry point (TypeScript)
 ```
 
-`agent-memory.ts` spawns `opencode_bridge_batch.py` once on
-`session.start`; every subsequent event (`chat.message`, `session.end`,
-etc.) is piped as a JSON line into that single process's stdin. The
-bridge accumulates events and flushes all of them to the server on
-`session.end` (or when the process is killed). This eliminates the
-per-message process-fork overhead that the old per-event bridge had.
+The plugin flushes on session creation and each terminal execution event, and
+spools delivery locally while the server is unreachable.
 
 **Install:** `bash plugins/opencode/install_opencode.sh` copies the
-plugin to `~/.config/opencode/plugin/agent-memory.ts`.
+plugin to `~/.config/opencode/plugins/agent-memory.ts`.
 
 ### 6. Verify
 

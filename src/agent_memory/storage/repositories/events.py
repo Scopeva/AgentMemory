@@ -19,7 +19,8 @@ async def insert_event(db: Database, event: EventEnvelope) -> bool:
     """Insert event idempotently. Returns True if newly inserted, False if duplicate."""
     now = _utcnow()
     async with db.connection() as conn:
-        # Auto-register project if it appears in an event but is not yet in the projects table.
+        # Lifecycle clients only know their own IDs. Materialize the required
+        # relational parents here so a first event can be accepted directly.
         if event.project_id:
             cursor = await conn.execute(
                 "SELECT 1 FROM projects WHERE project_id = ?", (event.project_id,)
@@ -31,6 +32,41 @@ async def insert_event(db: Database, event: EventEnvelope) -> bool:
                     "VALUES (?, ?, 'active', ?, ?)",
                     (event.project_id, event.project_id, now, now),
                 )
+        task_id = event.task_id
+        if task_id and event.project_id:
+            await conn.execute(
+                "INSERT OR IGNORE INTO tasks "
+                "(task_id, project_id, title, status, revision, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'pending', 1, ?, ?)",
+                (task_id, event.project_id, task_id, now, now),
+            )
+        elif task_id:
+            task_id = None
+        await conn.execute(
+            "INSERT OR IGNORE INTO sessions "
+            "(session_id, agent_type, native_session_id, workspace_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                event.session_id,
+                event.agent.value,
+                event.payload.get("native_session_id", event.session_id),
+                event.workspace_id,
+                now,
+            ),
+        )
+        await conn.execute(
+            "INSERT OR IGNORE INTO runs "
+            "(run_id, task_id, session_id, status, started_at, project_id) "
+            "VALUES (?, ?, ?, 'running', ?, ?)",
+            (event.run_id, task_id, event.session_id, now, event.project_id),
+        )
+        if event.event_type in {"run.settled", "run.interrupted"}:
+            outcome = event.payload.get("outcome", "interrupted")
+            status = outcome if outcome in {"completed", "failed", "cancelled", "interrupted"} else "interrupted"
+            await conn.execute(
+                "UPDATE runs SET status = ?, ended_at = ? WHERE run_id = ?",
+                (status, now, event.run_id),
+            )
         # Check by event_id (idempotency key)
         cursor = await conn.execute(
             "SELECT 1 FROM events WHERE event_id = ?", (event.event_id,)

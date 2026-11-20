@@ -55,7 +55,10 @@ Admin API (restricted):
 - `session.compacted` – Context compaction occurred.
 - `turn.end` – Model turn completed.
 - `memory.extraction_requested` – Adapter asked agent to produce memory.
-- `memory.extraction_completed` – Agent returned extraction payload.
+- `memory.extraction_completed` – Agent returned extraction payload. When
+  `payload.memories` is a list of structured memory objects and `project_id`
+  is present, the server creates idempotent reviewable candidates (one per
+  title); it does not auto-accept them.
 
 ## Delivery Guarantees
 

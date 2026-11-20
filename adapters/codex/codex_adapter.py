@@ -16,6 +16,7 @@ extraction.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -63,7 +64,9 @@ class CodexHookObserver:
     def __init__(self, client: EventClient, config: CodexAdapterConfig):
         self._client = client
         self._config = config
-        self._seq = 0
+        # Each Codex hook runs in a fresh process, so a process-local counter
+        # would reuse sequence 1 for every lifecycle event.
+        self._seq = time.time_ns()
 
     def _next_seq(self) -> int:
         self._seq += 1
