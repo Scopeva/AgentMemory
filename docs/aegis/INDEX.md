@@ -9,6 +9,7 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-11-18 | plan | docs/aegis/plans/2026-11-18-plugin-delivery-repair.md | Plugin Delivery Repair |
 | 2026-11-20 | plan | docs/aegis/plans/2026-11-20-config-single-source.md | Configuration Single Source |
 | 2026-11-20 | spec | docs/aegis/specs/2026-11-20-source-independent-plugin-runtime-design.md | Source-Independent Plugin Runtime |
+| 2026-11-20 | plan | docs/aegis/plans/2026-11-20-source-independent-plugin-runtime.md | Source-Independent Plugin Runtime Implementation |
 | 2026-11-18 | work | docs/aegis/work/2026-11-18-reliability-security-repair/10-intent.md | Reliability and Security Repair intent |
 | 2026-11-18 | work | docs/aegis/work/2026-11-18-reliability-security-repair/20-checkpoint.md | Reliability and Security Repair checkpoint |
 | 2026-11-18 | work | docs/aegis/work/2026-11-18-reliability-security-repair/90-evidence.md | Reliability and Security Repair evidence |
