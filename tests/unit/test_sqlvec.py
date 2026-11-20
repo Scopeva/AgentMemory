@@ -2,26 +2,24 @@
 
 The tests do not require the actual sqlite-vec shared object. They verify:
   * load_sqlite_vec() returns False gracefully when the extension is absent.
-  * _resolve_env_path() honours SQLITE_VEC_PATH (file, directory, unset).
+  * configured sqlite-vec paths are honoured (file, directory, unset).
   * VectorIndex.upsert/search/delete are safe no-ops when unavailable.
   * ensure_vec0() is exported and callable.
 """
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from agent_memory.retrieval.sqlvec import load_sqlite_vec, _resolve_env_path, _candidate_paths
+from agent_memory.retrieval.sqlvec import load_sqlite_vec, _resolve_configured_path, _candidate_paths
 from agent_memory.retrieval.vector import (
     VectorIndex,
     vec_available,
@@ -55,41 +53,36 @@ class TestLoadSqliteVec:
 
 
 # ---------------------------------------------------------------------------
-# _resolve_env_path
+# _resolve_configured_path
 # ---------------------------------------------------------------------------
 
 
-class TestResolveEnvPath:
+class TestResolveConfiguredPath:
     def test_unset_returns_empty(self):
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("SQLITE_VEC_PATH", None)
-            assert _resolve_env_path() == []
+        assert _resolve_configured_path(None) == []
 
     def test_file_path(self, tmp_path: Path):
         f = tmp_path / "vec0.so"
         f.write_bytes(b"\x00")
-        with patch.dict(os.environ, {"SQLITE_VEC_PATH": str(f)}):
-            result = _resolve_env_path()
-            assert result == [f]
-            assert result[0].is_file()
+        result = _resolve_configured_path(str(f))
+        assert result == [f]
+        assert result[0].is_file()
 
     def test_directory_path(self, tmp_path: Path):
         d = tmp_path / "sqlite-vec"
         d.mkdir()
         (d / "vec0").write_bytes(b"\x00")
         (d / "vec0.so").write_bytes(b"\x00")
-        with patch.dict(os.environ, {"SQLITE_VEC_PATH": str(d)}):
-            result = _resolve_env_path()
-            # Directory form: all candidate names tried (vec0, sqlite_vec, vec)
-            # and platform-suffixed variants are produced for the directory.
-            assert len(result) >= 1
-            # vec0 and vec0.so must both be among the candidates
-            assert (d / "vec0") in result
-            assert (d / "vec0.so") in result
+        result = _resolve_configured_path(str(d))
+        # Directory form: all candidate names tried (vec0, sqlite_vec, vec)
+        # and platform-suffixed variants are produced for the directory.
+        assert len(result) >= 1
+        # vec0 and vec0.so must both be among the candidates
+        assert (d / "vec0") in result
+        assert (d / "vec0.so") in result
 
     def test_nonexistent_path_returns_empty(self):
-        with patch.dict(os.environ, {"SQLITE_VEC_PATH": "/nonexistent/vec0.so"}):
-            assert _resolve_env_path() == []
+        assert _resolve_configured_path("/nonexistent/vec0.so") == []
 
 
 # ---------------------------------------------------------------------------
@@ -99,18 +92,15 @@ class TestResolveEnvPath:
 
 class TestCandidatePaths:
     def test_no_duplicates(self):
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("SQLITE_VEC_PATH", None)
-            paths = _candidate_paths()
-            keys = [str(p) for p in paths]
-            assert len(keys) == len(set(keys)), "duplicate candidate paths found"
+        paths = _candidate_paths()
+        keys = [str(p) for p in paths]
+        assert len(keys) == len(set(keys)), "duplicate candidate paths found"
 
-    def test_env_file_takes_priority(self, tmp_path: Path):
+    def test_configured_file_takes_priority(self, tmp_path: Path):
         f = tmp_path / "vec0"
         f.write_bytes(b"\x00")
-        with patch.dict(os.environ, {"SQLITE_VEC_PATH": str(f)}):
-            paths = _candidate_paths()
-            assert paths[0] == f
+        paths = _candidate_paths(str(f))
+        assert paths[0] == f
 
 
 # ---------------------------------------------------------------------------

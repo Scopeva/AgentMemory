@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -29,7 +28,7 @@ class DatabaseConfig:
     busy_timeout_ms: int = 5000
 
     def resolved_path(self) -> Path:
-        return Path(os.path.expanduser(self.path))
+        return Path(self.path).expanduser()
 
 
 @dataclass
@@ -59,6 +58,7 @@ class RetrievalConfig:
     chunk_max_chars: int = 800
     chunk_min_chars: int = 200
     batch_index_max_docs: int = 100
+    sqlite_vec_path: str = ""
 
 
 @dataclass
@@ -98,36 +98,9 @@ class AppConfig:
     workers: WorkersConfig = field(default_factory=WorkersConfig)
 
 
-def _apply_env_overrides(config: AppConfig, env: dict[str, str]) -> AppConfig:
-    """Allow environment variables to override TOML values."""
-    if path := env.get("AGENT_MEMORY_DATABASE_PATH"):
-        config.database.path = path
-    if endpoint := env.get("AGENT_MEMORY_EMBEDDING_ENDPOINT"):
-        config.embedding.endpoint = endpoint
-    if provider := env.get("AGENT_MEMORY_EMBEDDING_PROVIDER"):
-        config.embedding.provider = provider
-    if enabled := env.get("AGENT_MEMORY_EMBEDDING_ENABLED"):
-        config.embedding.enabled = enabled.lower() in {"1", "true", "yes", "on"}
-    if token_env := env.get("AGENT_MEMORY_SECURITY_ADMIN_TOKEN_ENV"):
-        config.security.admin_token_env = token_env
-    if interval := env.get("AGENT_MEMORY_WORKERS_INTERVAL_SECONDS"):
-        try:
-            config.workers.interval_seconds = float(interval)
-        except ValueError:
-            pass
-    if backoff := env.get("AGENT_MEMORY_WORKERS_EMPTY_BACKOFF_SECONDS"):
-        try:
-            config.workers.empty_backoff_seconds = float(backoff)
-        except ValueError:
-            pass
-    if origins := env.get("AGENT_MEMORY_CORS_ORIGINS"):
-        config.server.cors_origins = [o.strip() for o in origins.split(",") if o.strip()]
-    return config
-
-
 def load_config(path: str | None = None) -> AppConfig:
-    """Load TOML config and apply environment variable overrides."""
-    config_path = Path(os.path.expanduser(path or os.environ.get("AGENT_MEMORY_CONFIG_PATH", "")))
+    """Load service settings from the canonical TOML file."""
+    config_path = Path(path).expanduser() if path else Path("config.toml")
     data: dict[str, Any] = {}
     if config_path.is_file():
         with open(config_path, "rb") as f:
@@ -147,6 +120,5 @@ def load_config(path: str | None = None) -> AppConfig:
         security=SecurityConfig(**security_data),
         workers=WorkersConfig(**data.get("workers", {})),
     )
-    config = _apply_env_overrides(config, os.environ)
     config.embedding.validate_endpoint()
     return config

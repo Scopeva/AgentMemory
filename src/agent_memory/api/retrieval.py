@@ -157,9 +157,10 @@ async def index_status(
     """Report pending index jobs + vector availability."""
     dispatcher = getattr(request.app.state, "job_dispatcher", None)
     pending = dispatcher.pending_count() if dispatcher else 0
-    from agent_memory.retrieval.vector import vec_available
+    worker = getattr(request.app.state, "indexing_worker", None)
+    vector = worker.vector if worker is not None else None
 
     return {
         "pending_index_jobs": pending,
-        "vector_available": vec_available(),
+        "vector_available": bool(vector and vector.available),
     }

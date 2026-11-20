@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -10,14 +9,15 @@ import pytest
 
 @pytest.fixture
 def app_env(tmp_path: Path, monkeypatch):
-    """Set env vars for a fresh DB and build the FastAPI app with TestClient."""
+    """Set TOML settings for a fresh DB and build the FastAPI app with TestClient."""
     from agent_memory.config import DatabaseConfig, load_config
     from agent_memory.main import create_app
 
     db_path = tmp_path / "memory.db"
-    monkeypatch.setenv("AGENT_MEMORY_DATABASE_PATH", str(db_path))
-    monkeypatch.setenv("AGENT_MEMORY_CONFIG_PATH", "")
-    monkeypatch.setenv("AGENT_MEMORY_EMBEDDING_ENABLED", "false")
+    (tmp_path / "config.toml").write_text(
+        f"[database]\npath = {str(db_path)!r}\n\n[embedding]\nenabled = false\n"
+    )
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("AGENT_MEMORY_ADMIN_TOKEN", raising=False)
     yield str(db_path)
 

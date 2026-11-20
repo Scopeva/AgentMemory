@@ -17,12 +17,18 @@ if c.embedding.enabled:
     print('BGE-M3 status:', resp.status_code)
 "
 
-# Check whether sqlite-vec is loaded (hybrid vector search enabled)
+# Check whether the configured sqlite-vec path loads
 python -c "
-from agent_memory.retrieval.vector import vec_available
-print('sqlite-vec available:', vec_available())
+import sqlite3
+from agent_memory.config import load_config
+from agent_memory.retrieval.sqlvec import load_sqlite_vec
+c = load_config()
+conn = sqlite3.connect(':memory:')
+print('sqlite-vec available:', load_sqlite_vec(conn, c.retrieval.sqlite_vec_path))
+conn.close()
 "
-# If False and hybrid search is required, set SQLITE_VEC_PATH and restart.
+# If False and hybrid search is required, set retrieval.sqlite_vec_path in
+# config.toml and restart.
 ```
 
 ### 2. Database Migrations
@@ -180,7 +186,7 @@ Structured JSON logs to stdout. Key fields:
 
 ### Alerting
 - BGE-M3 endpoint unreachable for > 5 min → retrieval degrades to lexical-only
-- `vector_available: false` when hybrid search expected → check `SQLITE_VEC_PATH`
+- `vector_available: false` when hybrid search expected → check `retrieval.sqlite_vec_path`
 - Pending index jobs > 100 → dispatcher stuck; run `memoryctl index drain`
 - Spool > 1000 events → server unreachable
 - DB integrity_check failure → restore from backup immediately

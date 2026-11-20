@@ -1,0 +1,54 @@
+[server]
+# Docker publishes this service only on the host loopback interface. For a
+# bare process, set host to "127.0.0.1" if it must not listen on all interfaces.
+host = "0.0.0.0"
+port = 8765
+transport = "streamable-http"
+cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://uevfsysi2ejhbbsjqwegilhsmm0vbqzf.lambda-url.ap-southeast-1.on.aws",
+]
+
+[database]
+# The Docker volume is mounted at /data. For a bare process, use a host path
+# such as "~/.local/share/agent-memory/memory.db" instead.
+path = "/data/memory.db"
+journal_mode = "wal"
+busy_timeout_ms = 5000
+
+[embedding]
+provider = "bge-m3-http"
+endpoint = "http://127.0.0.1:8001"
+model = "bge-m3"
+dimension = 1024
+enabled = true
+
+[retrieval]
+lexical_top_k = 20
+vector_top_k = 20
+final_top_k = 6
+rrf_k = 60
+chunk_max_chars = 800
+chunk_min_chars = 200
+batch_index_max_docs = 100
+# Optional absolute path to vec0.so / vec0.dylib, or its containing directory.
+sqlite_vec_path = ""
+
+[memory]
+auto_capture = true
+approval_required_for_adr = true
+max_context_tokens = 2000
+
+[events]
+durable_spool = true
+retry_enabled = true
+max_extraction_attempts = 1
+
+[security]
+# The token value is deliberately supplied only by this environment variable.
+admin_token_env = "AGENT_MEMORY_ADMIN_TOKEN"
+
+[workers]
+interval_seconds = 30.0
+empty_backoff_seconds = 120.0

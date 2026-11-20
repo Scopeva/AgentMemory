@@ -40,8 +40,7 @@ def _utcnow() -> str:
 
 
 def _load_cfg():
-    path = os.environ.get("AGENT_MEMORY_CONFIG_PATH", "")
-    return load_config(path or None)
+    return load_config()
 
 
 def _connect(cfg) -> sqlite3.Connection:

@@ -28,13 +28,13 @@ def vec_available() -> bool:
     return _VEC_AVAILABLE
 
 
-def ensure_vec0(conn: sqlite3.Connection) -> bool:
+def ensure_vec0(conn: sqlite3.Connection, configured_path: str | None = None) -> bool:
     """Load sqlite-vec on a live connection and report success.
 
     Per-connection: each new sqlite3.Connection must call this before
     using ``vec0`` virtual tables.
     """
-    return load_sqlite_vec(conn)
+    return load_sqlite_vec(conn, configured_path)
 
 
 class VectorIndex:
@@ -44,15 +44,20 @@ class VectorIndex:
     ``available`` is False.
     """
 
-    def __init__(self, conn: sqlite3.Connection, dimension: int = 1024):
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        dimension: int = 1024,
+        sqlite_vec_path: str | None = None,
+    ):
         self._conn = conn
         self._dimension = dimension
         # Per-connection load; the import-time probe tells us whether the
         # shared object exists anywhere, but each live connection must load
         # it before the virtual table can be created.
         self._enabled = False
-        if _VEC_AVAILABLE:
-            if ensure_vec0(conn):
+        if _VEC_AVAILABLE or sqlite_vec_path:
+            if ensure_vec0(conn, sqlite_vec_path):
                 try:
                     conn.execute(
                         f"CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0("
@@ -121,5 +126,7 @@ class VectorIndex:
         return results[:limit]
 
 
-def create_vector_index(conn: sqlite3.Connection, dimension: int = 1024) -> VectorIndex:
-    return VectorIndex(conn, dimension=dimension)
+def create_vector_index(
+    conn: sqlite3.Connection, dimension: int = 1024, sqlite_vec_path: str | None = None
+) -> VectorIndex:
+    return VectorIndex(conn, dimension=dimension, sqlite_vec_path=sqlite_vec_path)

@@ -7,23 +7,13 @@ services:
       # Host agents reach the service on localhost only.
       - "127.0.0.1:8765:8765"
     environment:
-      # Config / data paths (override in your .env or shell profile)
-      AGENT_MEMORY_CONFIG_PATH: /app/config.example.toml
-      AGENT_MEMORY_DATABASE_PATH: /data/memory.db
       AGENT_MEMORY_ADMIN_TOKEN: ${AGENT_MEMORY_ADMIN_TOKEN:?set an admin token}
-      # BGE-M3 lives on the host; from inside the container use
-      # host.docker.internal (Linux: add extra_hosts as shown below).
-      AGENT_MEMORY_EMBEDDING_ENDPOINT: "http://host.docker.internal:8001"
-      # Optional: sqlite-vec shared object (mount it into the container
-      # or build it into your own image)
-      # SQLITE_VEC_PATH: /usr/local/lib/sqlite-vec/vec0.so
     # Linux needs this for host.docker.internal resolution
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - memory-data:/data
-      # If you have vec0.so on the host and want to share it:
-      # - /usr/local/lib/sqlite-vec:/usr/local/lib/sqlite-vec:ro
+      - ./config.toml:/app/config.toml:ro
 
 volumes:
   memory-data:

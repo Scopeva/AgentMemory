@@ -1,15 +1,15 @@
 """Loadable-extension loader for sqlite-vec.
 
-This module centralises where the sqlite-vec shared object is searched for,
-so deployment environments can drop ``vec0.so`` / ``vec0.dylib`` into a
-directory named in the ``SQLITE_VEC_PATH`` environment variable.
+This module centralises where the sqlite-vec shared object is searched for.
+Deployments may set ``retrieval.sqlite_vec_path`` in ``config.toml`` to a
+shared object or a directory that contains it.
 
 If the extension is not found, ``load_sqlite_vec()`` returns False and the
 caller must degrade to lexical-only retrieval (the ``VectorIndex.available``
 flag already does this).
 
 Search order (first hit wins):
-  1. ``$SQLITE_VEC_PATH`` — absolute path to the shared object, or a directory
+  1. configured path — absolute path to the shared object, or a directory
      containing it (common names tried: vec0, sqlite_vec, vec; with and
      without a platform suffix such as ``.so`` / ``.dylib`` / ``.dll``).
   2. ``/usr/lib/sqlite-vec`` and ``/usr/local/lib/sqlite-vec``.
@@ -29,7 +29,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 import sysconfig
 from pathlib import Path
@@ -61,11 +60,11 @@ def _dir_candidates(directory: Path) -> list[Path]:
     return out
 
 
-def _resolve_env_path() -> list[Path]:
-    raw = os.environ.get("SQLITE_VEC_PATH", "").strip()
+def _resolve_configured_path(raw: str | None) -> list[Path]:
+    raw = (raw or "").strip()
     if not raw:
         return []
-    p = Path(os.path.expanduser(raw))
+    p = Path(raw).expanduser()
     if p.is_file():
         return [p]
     if p.is_dir():
@@ -73,9 +72,9 @@ def _resolve_env_path() -> list[Path]:
     return []
 
 
-def _candidate_paths() -> list[Path]:
+def _candidate_paths(configured_path: str | None = None) -> list[Path]:
     paths: list[Path] = []
-    paths.extend(_resolve_env_path())
+    paths.extend(_resolve_configured_path(configured_path))
     for d in _CANDIDATE_DIRS:
         paths.extend(_dir_candidates(Path(d)))
     # Python site-packages
@@ -98,7 +97,7 @@ def _candidate_paths() -> list[Path]:
     return unique
 
 
-def load_sqlite_vec(conn: sqlite3.Connection) -> bool:
+def load_sqlite_vec(conn: sqlite3.Connection, configured_path: str | None = None) -> bool:
     """Enable load-extension support and attempt to load the sqlite-vec module.
 
     Returns True on success, False if no shared object was found. The
@@ -110,7 +109,7 @@ def load_sqlite_vec(conn: sqlite3.Connection) -> bool:
         logger.debug("enable_load_extension failed: %s", exc)
         return False
 
-    for path in _candidate_paths():
+    for path in _candidate_paths(configured_path):
         if not path.is_file():
             continue
         try:

@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 COPY pyproject.toml ./
-COPY config.example.toml ./
+COPY config.toml ./
 COPY src ./src
 COPY cli ./cli
 COPY web ./web
@@ -16,13 +16,7 @@ RUN pip install --no-cache-dir .
 # repo layout so the *latest* source is always what runs. This also fixes
 # stale-site-packages bugs (e.g. browsing.py calling a repository function
 # that only exists in newer src/ revisions).
-ENV AGENT_MEMORY_CONFIG_PATH=/app/config.example.toml \
-    AGENT_MEMORY_DATABASE_PATH=/data/memory.db \
-    PYTHONPATH=/app/src:/app/cli
-
-# sqlite-vec: point at the shared object to enable hybrid vector search.
-# Without it the service runs in lexical-only mode.
-# ENV SQLITE_VEC_PATH=/usr/local/lib/sqlite-vec/vec0.so
+ENV PYTHONPATH=/app/src:/app/cli
 
 VOLUME /data
 

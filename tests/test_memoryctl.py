@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 from pathlib import Path
 
 import pytest
@@ -19,8 +18,8 @@ main = _memoryctl.main
 
 
 @pytest.fixture
-def db_env(tmp_path: Path):
-    """Set up a migrated DB and env vars pointing at it."""
+def db_env(tmp_path: Path, monkeypatch):
+    """Set up a migrated DB and canonical TOML pointing at it."""
     from agent_memory.config import DatabaseConfig
     from agent_memory.storage.database import Database
 
@@ -29,8 +28,10 @@ def db_env(tmp_path: Path):
     db_path = tmp_path / "memory.db"
     db = Database(DatabaseConfig(path=str(db_path)))
     asyncio.run(db.migrate())
-    os.environ["AGENT_MEMORY_DATABASE_PATH"] = str(db_path)
-    os.environ["AGENT_MEMORY_CONFIG_PATH"] = ""
+    (tmp_path / "config.toml").write_text(
+        f"[database]\npath = {str(db_path)!r}\n\n[embedding]\nenabled = false\n"
+    )
+    monkeypatch.chdir(tmp_path)
     return str(db_path)
 
 

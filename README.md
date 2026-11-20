@@ -11,8 +11,7 @@ OpenCode) shared long-term memory and clean task handoffs.
 - **Background indexing**: `BackgroundIndexingLoop` (in `src/agent_memory/workers/`)
   drains the `index_jobs` outbox every `workers.interval_seconds` (30 s
   default); sleeps `workers.empty_backoff_seconds` (120 s default) when the
-  queue is empty. Cadence is configurable via TOML and environment variables
-  (see `config.example.toml` / `.env.example`).
+  queue is empty. Cadence is configured in `config.toml`.
 - **LLM inference**: Uses the existing agent's own model; no separate LLM provider
 
 ## Getting Started
@@ -29,23 +28,23 @@ pytest
 
 ## Configuration
 
-Copy `config.example.toml` to `config.toml` and adjust paths. Environment
-variables override TOML values; see `.env.example`.
+`config.toml` is the canonical source for all non-sensitive service settings.
+Set the admin token value in the environment (for example, copy `.env.example`
+to `.env` for Docker Compose); no other service setting is read from `.env`.
 
 | Section | Keys | Notes |
 |---|---|---|
 | `[server]` | `host`, `port`, `transport` | FastAPI + FastMCP bind |
 | `[database]` | `path`, `journal_mode`, `busy_timeout_ms` | SQLite + WAL |
 | `[embedding]` | `provider`, `endpoint`, `model`, `dimension`, `enabled` | BGE-M3 llama service |
-| `[retrieval]` | `lexical_top_k`, `vector_top_k`, `final_top_k`, `rrf_k`, `chunk_max_chars`, `chunk_min_chars`, `batch_index_max_docs` | hybrid FTS5 + vector RRF fusion |
+| `[retrieval]` | `lexical_top_k`, `vector_top_k`, `final_top_k`, `rrf_k`, `chunk_max_chars`, `chunk_min_chars`, `batch_index_max_docs`, `sqlite_vec_path` | hybrid FTS5 + vector RRF fusion |
 | `[memory]` | `auto_capture`, `approval_required_for_adr`, `max_context_tokens` | candidate/promotion policy |
 | `[events]` | `durable_spool`, `retry_enabled`, `max_extraction_attempts` | at-least-once spool + dedup |
 | `[security]` | `admin_token_env` | token for privileged HTTP routes |
 | `[workers]` | `interval_seconds`, `empty_backoff_seconds` | background indexing loop cadence |
 
-Environment overrides: `AGENT_MEMORY_WORKERS_INTERVAL_SECONDS`,
-`AGENT_MEMORY_WORKERS_EMPTY_BACKOFF_SECONDS`, and `SQLITE_VEC_PATH`
-(see `.env.example`).
+`[security].admin_token_env` names the one environment variable that supplies
+the admin token value; it does not put the token itself in TOML.
 
 ### Database Migrations
 
@@ -70,9 +69,9 @@ lexical-only retrieval; no code changes are required to fall back.
    [sqlite-vec releases page](https://github.com/ashtum/sqlite-vec/releases).
 2. Place the shared object (`vec0.so` / `vec0.dylib`) in a directory,
    e.g. `/usr/local/lib/sqlite-vec/`.
-3. Set the environment variable:
-   ```bash
-   export SQLITE_VEC_PATH=/usr/local/lib/sqlite-vec/vec0.so
+3. Set `[retrieval].sqlite_vec_path` in `config.toml`:
+   ```toml
+   sqlite_vec_path = "/usr/local/lib/sqlite-vec/vec0.so"
    ```
    Alternatively, point it at a directory; the loader will try the common
    base names (`vec0`, `sqlite_vec`, `vec`) with platform suffixes.
@@ -134,12 +133,11 @@ python -m agent_memory.main
 docker compose up -d
 # → maps host 127.0.0.1:8765 to the container's service port
 ```
-See `docker-compose.yml` in the repo. The compose file wires:
+See `compose.yaml` in the repo. The compose file wires:
 - loopback-only port mapping `127.0.0.1:8765:8765` (host → container)
-- a persistent volume `memory-data:/data` (SQLite survives restarts)
-- `extra_hosts: host.docker.internal:host-gateway` (Linux only, so the
-  container can reach a host-side BGE-M3 service)
-- an optional commented line for mounting `SQLITE_VEC_PATH`
+- a persistent volume `agent-memory-data:/data` (SQLite survives restarts)
+- a read-only mount of the canonical `config.toml`
+- `AGENT_MEMORY_ADMIN_TOKEN` as the only environment value
 
 > **How the host agent reaches the container:** Docker's port mapping
 > publishes the container's port on the host's loopback. No special URL is
@@ -160,8 +158,8 @@ export AGENT_MEMORY_SPOOL_ROOT=~/.local/state/agent-memory
 ```
 
 These come from `adapters/shared/event_client.py` — every adapter
-(Pi / Codex / OpenCode) reads the same vars, so a single shell profile
-or `.env` file works for all of them.
+(Pi / Codex / OpenCode) reads the same vars. They are per-session adapter
+metadata, not service configuration; keep them in the agent launch context.
 
 The installers also register the agent-facing MCP endpoint at
 `http://127.0.0.1:8765/mcp/`. It exposes `submit_memory_candidate` and the
@@ -203,9 +201,8 @@ continues with no aliases).
 **Docker note:** `AGENT_MEMORY_SERVER_URL` is read by the *host* agent,
 not the container. It must always be a host-reachable address — for the
 default compose setup that's `http://127.0.0.1:8765`. If you remap the
-host port in compose, update this env var to match (the container-side
-BGE-M3 URL is a separate setting, `AGENT_MEMORY_EMBEDDING_ENDPOINT`, that
-uses `host.docker.internal:8001`).
+host port in compose, update this env var to match. The container-side BGE-M3
+URL is configured by `[embedding].endpoint` in `config.toml`.
 
 ### 3. Pi
 

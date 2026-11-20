@@ -38,7 +38,11 @@ class SearchService:
         if self._sync_conn is not None:
             self._lexical = LexicalIndex(self._sync_conn)
             dim = getattr(embedding_provider, "dimension", 1024) if embedding_provider else 1024
-            self._vector = create_vector_index(self._sync_conn, dimension=dim)
+            self._vector = create_vector_index(
+                self._sync_conn,
+                dimension=dim,
+                sqlite_vec_path=retrieval_config.sqlite_vec_path,
+            )
         else:
             self._lexical = None
             self._vector = None

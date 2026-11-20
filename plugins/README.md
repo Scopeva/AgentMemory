@@ -140,7 +140,8 @@ python -m memoryctl memory search --project-id my-project "关键词"
   `127.0.0.1:8765` on the host (see `docker-compose.yml`). Agents point
   at that; no container-specific URL needed.
 - **sqlite-vec**: optional. Without it the service runs in lexical-only
-  mode; with it (via `SQLITE_VEC_PATH`), hybrid vector search is on.
+  mode; set `retrieval.sqlite_vec_path` in `config.toml` to enable hybrid
+  vector search.
 - **At-least-once delivery**: each adapter writes to a durable spool
   before hitting the network. If the server is down, events are
   replayed on the next session start.

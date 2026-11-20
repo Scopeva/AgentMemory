@@ -35,7 +35,11 @@ class IndexingWorker:
         )
         self._lexical = LexicalIndex(conn)
         self._vector = (
-            create_vector_index(conn, embedding_provider.dimension)
+            create_vector_index(
+                conn,
+                embedding_provider.dimension,
+                sqlite_vec_path=retrieval_config.sqlite_vec_path,
+            )
             if embedding_provider is not None
             else None
         )
