@@ -1,4 +1,4 @@
-"""Pi extension entry point.
+"""Packaged legacy Pi extension entry point.
 
 This module is loaded by Pi's extension mechanism (JS/TS). It bridges
 Pi's lifecycle hooks to the Python adapter so that all events and

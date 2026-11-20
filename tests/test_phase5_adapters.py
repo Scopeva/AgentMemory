@@ -23,9 +23,9 @@ import pytest
 # Make adapters importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from adapters.codex.codex_adapter import CodexAdapter, CodexAdapterConfig
-from adapters.opencode.opencode_adapter import OpenCodeAdapter, OpenCodeAdapterConfig
-from adapters.shared.event_client import build_event
+from agent_memory.adapters.codex.codex_adapter import CodexAdapter, CodexAdapterConfig
+from agent_memory.adapters.opencode.opencode_adapter import OpenCodeAdapter, OpenCodeAdapterConfig
+from agent_memory.adapters.shared.event_client import build_event
 
 
 def _read_spool(agent: str, root: Path) -> list[dict]:
@@ -53,7 +53,7 @@ def _event_types(records: list[dict]) -> list[str]:
 class TestCodexAdapter:
     def test_separate_hook_processes_get_distinct_sequences(self, tmp_path: Path, monkeypatch):
         """Fresh hook observers must not reuse a run's natural event key."""
-        from adapters.codex import codex_adapter
+        from agent_memory.adapters.codex import codex_adapter
 
         ticks = iter((100, 200))
         monkeypatch.setattr(codex_adapter.time, "time_ns", lambda: next(ticks))
@@ -122,7 +122,7 @@ class TestCodexAdapter:
         adapter = CodexAdapter(cfg)
 
         # Simulate unreachable: manually spool an event
-        from adapters.shared.event_client import DurableSpool
+        from agent_memory.adapters.shared.event_client import DurableSpool
         spool = DurableSpool("codex", root=tmp_path)
         evt = build_event(
             "run.settled", agent="codex", session_id="s1", run_id="s1",
@@ -256,7 +256,7 @@ class TestOpenCodeAdapter:
         cfg = OpenCodeAdapterConfig(server_url="http://127.0.0.1:8765", spool_root=str(tmp_path))
         adapter = OpenCodeAdapter(cfg)
 
-        from adapters.shared.event_client import DurableSpool
+        from agent_memory.adapters.shared.event_client import DurableSpool
         spool = DurableSpool("opencode", root=tmp_path)
         evt = build_event(
             "run.settled", agent="opencode", session_id="s1", run_id="s1",

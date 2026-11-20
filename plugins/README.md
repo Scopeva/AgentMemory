@@ -1,25 +1,17 @@
 # Agent Plugins
 
-Installable integrations for the three supported coding agents. They share
-the `AGENT_MEMORY_*` configuration and persist lifecycle events through a
-durable local spool.
+Installable integrations for the three supported coding agents. They are
+shipped inside the `agent-memory` wheel, so installation does not require a
+source checkout. They share the `AGENT_MEMORY_*` session metadata and persist
+lifecycle events through a durable local spool.
 
 ```
-plugins/
-├── codex/
-│   ├── hooks/
-│   │   ├── _bootstrap.py        # shared sys.path + env config helper
-│   │   ├── am_session_start.py
-│   │   ├── am_pre_compact.py
-│   │   ├── am_stop.py
-│   │   └── am_session_end.py
-│   └── install_codex.sh
-├── opencode/
-│   ├── agent-memory.ts          # OpenCode 2.x TypeScript plugin
-│   └── install_opencode.sh
-└── pi/
-    ├── agent-memory.ts          # Pi TypeScript extension
-    └── install_pi.sh
+agent_memory/
+├── adapters/                    # Python lifecycle runtime
+└── integrations/
+    ├── codex.py                 # four Codex hook dispatches
+    ├── installer.py             # agent-memory-install <agent>
+    └── assets/                  # Pi/OpenCode TypeScript extensions
 ```
 
 ## Common env (all three agents)
@@ -28,20 +20,12 @@ Set these in your shell profile (or a project `.env`) before launching
 the agent:
 
 ```bash
-export AGENT_MEMORY_REPO_ROOT=/path/to/AgentMemory
 export AGENT_MEMORY_SERVER_URL=http://127.0.0.1:8765   # host-side Docker: same
 # 可选：不设 AGENT_MEMORY_PROJECT_ID 时，会自动取当前目录 / git 仓库名
 export AGENT_MEMORY_PROJECT_ID=my-project              # 可选，覆盖自动探测
 export AGENT_MEMORY_WORKSPACE_ID=main                    # optional
 export AGENT_MEMORY_TASK_ID=feat-x                       # optional
 ```
-
-`AGENT_MEMORY_REPO_ROOT` is needed only by the Codex Python hooks. Its
-installer embeds the current repository path in the registered commands, so
-you normally do not need to export it manually.
-
-The Codex installer uses this repository's `.venv/bin/python` by default. If
-your environment lives elsewhere, set `AGENT_MEMORY_PYTHON` before installing.
 
 `AGENT_MEMORY_PROJECT_ID` is **optional**: when unset, the adapter
 auto-detects it from your working directory (git repo basename, or CWD
@@ -81,14 +65,14 @@ tests or team-shared configs checked into the repo).
 ## Codex
 
 ```bash
-./plugins/codex/install_codex.sh
+agent-memory-install codex
 ```
 
 What happens:
-1. The four Python hook scripts are copied into `~/.codex/agent-memory/`
-   (or `$CODEX_HOME/agent-memory/` if set).
-2. The installer merges only Agent Memory entries into the active
-   `$CODEX_HOME/hooks.json` registry and retains a first-install backup.
+1. The installer merges only Agent Memory entries into `$CODEX_HOME/hooks.json`.
+2. Each registered command uses the Python environment that owns the installed
+   wheel and imports `agent_memory.integrations.codex`; no repository path is
+   recorded.
 
 Then in the Codex CLI:
 - Run `/hooks` to **review and trust** the four new hooks (Codex will
@@ -99,11 +83,11 @@ Then in the Codex CLI:
 ## OpenCode
 
 ```bash
-./plugins/opencode/install_opencode.sh
+agent-memory-install opencode
 ```
 
 What happens:
-1. `agent-memory.ts` is copied to `~/.config/opencode/plugins/` (or
+1. The packaged `agent-memory.ts` is copied to `~/.config/opencode/plugins/` (or
    `$OPENCODE_PLUGIN_DIR` if set).
 2. The OpenCode 2.x plugin consumes its async lifecycle event stream,
    posts first-session and terminal-run batches directly, and spools on
@@ -114,11 +98,11 @@ What happens:
 ## Pi
 
 ```bash
-./plugins/pi/install_pi.sh
+agent-memory-install pi
 ```
 
 What happens:
-1. `plugins/pi/agent-memory.ts` is copied to
+1. The packaged `agent-memory.ts` is copied to
    `~/.pi/agent/extensions/agent-memory-pi.ts` (or `$PI_EXTENSIONS_DIR`
    if set).
 2. Pi loads it and the extension reads the current session ID from the
@@ -133,6 +117,19 @@ python -m memoryctl index status --json
 # Search captured memories
 python -m memoryctl memory search --project-id my-project "关键词"
 ```
+
+## Manual no-source verification
+
+1. Build and install the wheel into an isolated Python environment, then leave
+   the source checkout.
+2. Run `agent-memory-install codex`, `agent-memory-install opencode`, and
+   `agent-memory-install pi` from another directory. The Codex command in
+   `hooks.json` must not contain `AGENT_MEMORY_REPO_ROOT` or a checkout path.
+3. Make the checkout unavailable, restart each host agent, and create a
+   project/session. Confirm lifecycle events create the project and that MCP
+   candidate submission still saves a candidate.
+4. With the service stopped, create an event, restart it, and confirm the
+   agent-specific spool replays it.
 
 ## Notes
 

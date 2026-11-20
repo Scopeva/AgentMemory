@@ -14,6 +14,9 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-11-18 | work | docs/aegis/work/2026-11-18-reliability-security-repair/20-checkpoint.md | Reliability and Security Repair checkpoint |
 | 2026-11-18 | work | docs/aegis/work/2026-11-18-reliability-security-repair/90-evidence.md | Reliability and Security Repair evidence |
 | 2026-11-18 | work | docs/aegis/work/2026-11-18-reliability-security-repair/99-reflection.md | Reliability and Security Repair reflection |
+| 2026-11-20 | work | docs/aegis/work/2026-11-20-source-independent-plugin-runtime/10-intent.md | Source-Independent Plugin Runtime intent |
+| 2026-11-20 | work | docs/aegis/work/2026-11-20-source-independent-plugin-runtime/20-checkpoint.md | Source-Independent Plugin Runtime checkpoint |
+| 2026-11-20 | work | docs/aegis/work/2026-11-20-source-independent-plugin-runtime/90-evidence.md | Source-Independent Plugin Runtime evidence |
 | 2026-11-18 | artifact | docs/aegis/work/2026-11-18-reliability-security-repair/task-intent-draft.json | Reliability and Security Repair task intent draft |
 | 2026-11-18 | artifact | docs/aegis/work/2026-11-18-reliability-security-repair/baseline-read-set-hint.json | Reliability and Security Repair baseline read-set hint |
 | 2026-11-18 | artifact | docs/aegis/work/2026-11-18-reliability-security-repair/baseline-usage-draft.json | Reliability and Security Repair baseline usage draft |

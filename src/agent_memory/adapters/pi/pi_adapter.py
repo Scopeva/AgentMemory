@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
-from adapters.shared.event_client import DurableSpool, EventClient, build_event, detect_project_id
+from agent_memory.adapters.shared.event_client import DurableSpool, EventClient, build_event, detect_project_id
 
 
 # ---------------------------------------------------------------------------

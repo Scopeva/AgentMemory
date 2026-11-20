@@ -40,7 +40,7 @@ def detect_project_id(explicit: Optional[str] = None) -> Optional[str]:
     automatically maps to its own memory namespace, and aliases normalize
     multiple local directories of the same logical project.
     """
-    from adapters.shared.project_id import resolve_project_id
+    from agent_memory.adapters.shared.project_id import resolve_project_id
 
     return resolve_project_id(explicit=explicit)
 

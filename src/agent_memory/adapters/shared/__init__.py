@@ -1,6 +1,6 @@
 """Shared event schema, HTTP client, and spool used by all adapters."""
 
-from adapters.shared.event_client import (
+from agent_memory.adapters.shared.event_client import (
     DurableSpool,
     EventClient,
     SpooledEvent,

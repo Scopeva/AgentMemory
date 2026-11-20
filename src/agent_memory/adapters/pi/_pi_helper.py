@@ -15,12 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-
-# Make the adapters package importable
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from adapters.pi.pi_adapter import (
+from agent_memory.adapters.pi.pi_adapter import (
     ExtractionResult,
     PiAdapter,
     PiAdapterConfig,
@@ -31,7 +26,7 @@ def _make_adapter() -> PiAdapter:
     project_id = os.environ.get("AGENT_MEMORY_PROJECT_ID")
     # Fallback: auto-detect from CWD when env var is not set
     if not project_id:
-        from adapters.shared.event_client import detect_project_id
+        from agent_memory.adapters.shared.event_client import detect_project_id
         project_id = detect_project_id()
     workspace_id = os.environ.get("AGENT_MEMORY_WORKSPACE_ID")
     task_id = os.environ.get("AGENT_MEMORY_TASK_ID")

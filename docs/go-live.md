@@ -87,8 +87,7 @@ docker compose up -d
 ```bash
 # Pi adapter smoke test
 python -c "
-import sys; sys.path.insert(0, 'adapters')
-from adapters.pi.pi_adapter import PiAdapter, PiAdapterConfig
+from agent_memory.adapters.pi.pi_adapter import PiAdapter, PiAdapterConfig
 a = PiAdapter(PiAdapterConfig(project_id='smoke-test'))
 a.on_session_start('s-test', 'native-test')
 a.on_session_end('s-test')
@@ -98,8 +97,7 @@ a.close()
 
 # Codex adapter smoke test
 python -c "
-import sys; sys.path.insert(0, 'adapters')
-from adapters.codex import CodexAdapter, CodexAdapterConfig
+from agent_memory.adapters.codex import CodexAdapter, CodexAdapterConfig
 a = CodexAdapter(CodexAdapterConfig(project_id='smoke-test'))
 a.on_session_start('s-test', 'native-test')
 a.on_session_end('s-test')
@@ -109,8 +107,7 @@ a.close()
 
 # OpenCode adapter smoke test
 python -c "
-import sys; sys.path.insert(0, 'adapters')
-from adapters.opencode import OpenCodeAdapter, OpenCodeAdapterConfig
+from agent_memory.adapters.opencode import OpenCodeAdapter, OpenCodeAdapterConfig
 a = OpenCodeAdapter(OpenCodeAdapterConfig(project_id='smoke-test'))
 a.on_session_start('s-test', 'native-test')
 a.on_session_end('s-test')

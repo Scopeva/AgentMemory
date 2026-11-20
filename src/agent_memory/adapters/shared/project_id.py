@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Project-id alias resolution for agent adapters.
+"""Project-id alias resolution for packaged agent adapters.
 
 When an agent is launched from a working directory whose name does not
 match the stable project identifier you want to use (for example

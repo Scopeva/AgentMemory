@@ -23,8 +23,8 @@ import pytest_asyncio
 # Make adapters importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from adapters.pi.pi_adapter import ExtractionResult, PiAdapter, PiAdapterConfig
-from adapters.shared.event_client import DurableSpool
+from agent_memory.adapters.pi.pi_adapter import ExtractionResult, PiAdapter, PiAdapterConfig
+from agent_memory.adapters.shared.event_client import DurableSpool
 
 from agent_memory.config import DatabaseConfig
 from agent_memory.schemas import EventEnvelope, AgentType
@@ -142,7 +142,7 @@ class TestPiToServerFlow:
         with patch.object(httpx.Client, "post", autospec=True, side_effect=_mock_post):
             # Re-create a client pointed at the "now online" server and flush
             online_url = "http://127.0.0.1:8765"
-            from adapters.shared.event_client import EventClient
+            from agent_memory.adapters.shared.event_client import EventClient
             new_client = EventClient(
                 online_url, "pi", spool=spool,
             )

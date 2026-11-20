@@ -152,12 +152,11 @@ export AGENT_MEMORY_SERVER_URL=http://127.0.0.1:8765
 export AGENT_MEMORY_PROJECT_ID=my-project        # optional — auto-detected if unset
 export AGENT_MEMORY_WORKSPACE_ID=main            # worktree / branch id
 export AGENT_MEMORY_TASK_ID=feat-x               # optional logical task
-export AGENT_MEMORY_REPO_ROOT=/path/to/AgentMemory  # where the repo lives
 # Spool location (optional, defaults to ~/.local/state/agent-memory/<agent>)
 export AGENT_MEMORY_SPOOL_ROOT=~/.local/state/agent-memory
 ```
 
-These come from `adapters/shared/event_client.py` — every adapter
+These come from `agent_memory.adapters.shared.event_client` — every adapter
 (Pi / Codex / OpenCode) reads the same vars. They are per-session adapter
 metadata, not service configuration; keep them in the agent launch context.
 
@@ -209,7 +208,7 @@ URL is configured by `[embedding].endpoint` in `config.toml`.
 Install the TypeScript extension into Pi's active global extension directory:
 
 ```bash
-bash plugins/pi/install_pi.sh
+agent-memory-install pi
 ```
 
 It records session/run/turn lifecycle events and flushes a session-start event
@@ -220,30 +219,13 @@ to another model automatically.
 
 ### 4. Codex
 
-Codex is hooks-based and observe-only (no extraction). Four lifecycle
-hooks are declared in `~/.codex/hooks.json`; each is a thin shell wrapper
-that calls into the shared bootstrap:
+Codex is hooks-based and observe-only (no extraction). The package installer
+merges four lifecycle commands into `~/.codex/hooks.json`; each invokes the
+same installed Python environment with `-m agent_memory.integrations.codex`.
+No copied hook file or source checkout is required.
 
-```
-~/.codex/
-├── hooks.json             # global registry; installer preserves other hooks
-├── agent-memory/
-│   ├── _bootstrap.py      # shared: sys.path setup, env, project_id detection
-│   ├── am_session_start.py # SessionStart → CodexAdapter.on_session_start()
-│   ├── am_pre_compact.py   # PreCompact → CodexAdapter.on_pre_compact()
-│   ├── am_stop.py          # Stop → CodexAdapter.on_stop()
-│   └── am_session_end.py   # SessionEnd → CodexAdapter.on_session_end()
-└── …
-```
-
-All four `am_*.py` scripts call `_bootstrap()` from `_bootstrap.py`
-(deduped — no more 50-line copy-paste per hook). The bootstrap reads the
-same env vars and auto-detects `project_id` via the alias table when
-`AGENT_MEMORY_PROJECT_ID` is unset.
-
-**Install:** `bash plugins/codex/install_codex.sh` copies the hooks to
-`~/.codex/agent-memory/` and merges entries into `~/.codex/hooks.json` (run
-`/hooks` in Codex CLI once to trust them).
+**Install:** `agent-memory-install codex`, then run `/hooks` in Codex CLI to
+review and trust the four hooks.
 
 ### 5. OpenCode
 
@@ -251,15 +233,14 @@ OpenCode 2.x supports TypeScript plugins; this one subscribes to the server's
 native async event stream and delivers lifecycle events directly over HTTP:
 
 ```
-plugins/opencode/
-└── agent-memory.ts            # OpenCode 2.x plugin entry point (TypeScript)
+agent_memory.integrations.assets/opencode/agent-memory.ts
 ```
 
 The plugin flushes on session creation and each terminal execution event, and
 spools delivery locally while the server is unreachable.
 
-**Install:** `bash plugins/opencode/install_opencode.sh` copies the
-plugin to `~/.config/opencode/plugins/agent-memory.ts`.
+**Install:** `agent-memory-install opencode` copies the packaged plugin to
+`~/.config/opencode/plugins/agent-memory.ts`.
 
 ### 6. Verify
 

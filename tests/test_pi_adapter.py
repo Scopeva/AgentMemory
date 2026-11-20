@@ -22,8 +22,8 @@ import pytest
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from adapters.shared.event_client import DurableSpool, EventClient, build_event
-from adapters.pi.pi_adapter import (
+from agent_memory.adapters.shared.event_client import DurableSpool, EventClient, build_event
+from agent_memory.adapters.pi.pi_adapter import (
     ExtractionResult,
     PiAdapter,
     PiAdapterConfig,

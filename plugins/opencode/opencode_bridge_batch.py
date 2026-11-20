@@ -23,21 +23,9 @@ import os
 import sys
 
 
-def _bootstrap() -> None:
-    root = os.environ.get("AGENT_MEMORY_REPO_ROOT")
-    if root:
-        sys.path.insert(0, root)
-        return
-    here = os.path.dirname(os.path.abspath(__file__))
-    candidate = os.path.abspath(os.path.join(here, "..", ".."))
-    if os.path.isdir(os.path.join(candidate, "adapters")):
-        sys.path.insert(0, candidate)
-
-
 def main() -> int:
-    _bootstrap()
     try:
-        from adapters.opencode.opencode_adapter import (
+        from agent_memory.adapters.opencode.opencode_adapter import (
             OpenCodeAdapter,
             OpenCodeAdapterConfig,
         )

@@ -1,5 +1,5 @@
 /**
- * Agent Memory lifecycle bridge for OpenCode 2.x.
+ * Source-independent Agent Memory lifecycle bridge for OpenCode 2.x.
  *
  * OpenCode delivers server events through an async iterator. This plugin
  * records session and execution boundaries to Agent Memory; it deliberately

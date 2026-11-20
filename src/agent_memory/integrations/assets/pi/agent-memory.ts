@@ -1,5 +1,5 @@
 /**
- * agent-memory extension for Pi (TypeScript, no Python dependency).
+ * Source-independent Agent Memory extension for Pi (TypeScript, no Python dependency).
  *
  * Pi extensions export a default factory function that receives
  * ExtensionAPI. The factory registers event handlers via pi.on().
