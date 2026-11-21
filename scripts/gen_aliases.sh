@@ -48,3 +48,5 @@ EOF
 
 echo "wrote $OUT"
 echo "edit it to add your directory -> project_id mappings."
+
+ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY 'A-bc-1234';
